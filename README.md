@@ -39,6 +39,10 @@ unredact path/to/file
 
 Default git branch: **`master`** (not `main`).
 
+### Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history (Keep a Changelog).
+
 ### CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on push and pull requests to `master`:

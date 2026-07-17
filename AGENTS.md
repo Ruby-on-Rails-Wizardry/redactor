@@ -73,6 +73,8 @@ mise run install-cli   # refresh global tools after entry-point changes
 
 CI (GitHub Actions on `master`): `.github/workflows/ci.yml` — install `.[dev]`, pytest+coverage, CLI smoke. Keep that workflow aligned with local test commands.
 
+When shipping user-visible changes, update [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]` (Keep a Changelog). Move entries into a version section when cutting a release.
+
 ## Security
 
 - Never commit `dictionary.yaml` or real secrets

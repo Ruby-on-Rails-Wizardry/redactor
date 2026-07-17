@@ -187,3 +187,58 @@ def test_dry_run_respects_excludes(redact_mod, workdir, monkeypatch, capsys):
     assert "Excluded: b.min.js" in out
     assert "Would redact: a.txt" in out
     assert "Would redact: b.min.js" not in out
+
+
+def test_cli_exclude_flag(redact_mod, workdir, monkeypatch, capsys):
+    Path("keep.txt").write_text("ip=10.0.0.1\n", encoding="utf-8")
+    Path("skip.log").write_text("ip=10.0.0.2\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["redact", "--exclude", "*.log", "keep.txt", "skip.log"],
+    )
+    redact_mod.main()
+    out = capsys.readouterr().out
+    assert "Excluded: skip.log" in out
+    assert Path("redacted/keep.txt").is_file()
+    assert not Path("redacted/skip.log").exists()
+
+
+def test_cli_include_flag(redact_mod, workdir, monkeypatch, capsys):
+    Path("a.env").write_text("TOKEN=abc\n", encoding="utf-8")
+    Path("b.txt").write_text("TOKEN=xyz\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["redact", "--include", "**/*.env", "a.env", "b.txt"],
+    )
+    redact_mod.main()
+    out = capsys.readouterr().out
+    assert "Not included: b.txt" in out
+    assert Path("redacted/a.env").is_file()
+    assert not Path("redacted/b.txt").exists()
+
+
+def test_cli_exclude_and_include_combined(redact_mod, workdir, monkeypatch, capsys):
+    Path("cfg").mkdir()
+    Path("cfg/a.env").write_text("TOKEN=a1\n", encoding="utf-8")
+    Path("cfg/b.env").write_text("TOKEN=b1\n", encoding="utf-8")
+    Path("cfg/c.txt").write_text("TOKEN=c1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "redact",
+            "--include",
+            "**/*.env",
+            "--exclude",
+            "**/b.env",
+            "cfg",
+        ],
+    )
+    redact_mod.main()
+    out = capsys.readouterr().out
+    assert "Excluded: cfg/b.env" in out or Path("redacted/cfg/a.env").is_file()
+    assert Path("redacted/cfg/a.env").is_file()
+    assert not Path("redacted/cfg/b.env").exists()
+    assert not Path("redacted/cfg/c.txt").exists()

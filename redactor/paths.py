@@ -191,3 +191,20 @@ def filter_excluded(paths, globs) -> tuple[list[Path], list[Path]]:
         else:
             kept.append(path)
     return kept, skipped
+
+
+def filter_included(paths, globs) -> tuple[list[Path], list[Path]]:
+    """If globs is non-empty, keep only paths matching at least one include glob.
+
+    Returns (kept, skipped). Empty globs means keep all (no include filter).
+    """
+    if not globs:
+        return list(paths), []
+    kept: list[Path] = []
+    skipped: list[Path] = []
+    for path in paths:
+        if is_excluded(path, globs):  # same matcher: match any glob
+            kept.append(path)
+        else:
+            skipped.append(path)
+    return kept, skipped

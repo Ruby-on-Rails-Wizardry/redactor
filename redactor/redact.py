@@ -9,7 +9,7 @@ import yaml
 from pathlib import Path
 
 from redactor import __version__
-from redactor.paths import expand_paths, filter_excluded
+from redactor.paths import expand_paths, filter_excluded, filter_included
 
 # Built-in defaults used when redacted/patterns.yaml is missing.
 # Order matters: patterns are applied top-to-bottom.
@@ -590,14 +590,23 @@ def redact_file(
     return dictionary, reverse_dict
 
 
-def redact_files(input_paths, dry_run=False):
+def redact_files(
+    input_paths,
+    dry_run=False,
+    extra_excludes=None,
+    includes=None,
+):
     """Redact one or more files or directories, sharing placeholders across the batch.
 
     Directories are walked recursively (skipping names like redacted/, .git/, etc.).
-    Path excludes from redacted/exclude.yaml are applied after expansion.
+    Path excludes from redacted/exclude.yaml plus optional CLI --exclude globs are
+    applied after expansion. Optional --include globs keep only matching paths.
     Per-file errors are logged to stderr; processing continues. Exit status is
     non-zero if any path failed.
     """
+    extra_excludes = list(extra_excludes or [])
+    includes = list(includes or [])
+
     paths, missing = expand_paths(input_paths)
     errors = 0
     for path in missing:
@@ -605,10 +614,15 @@ def redact_files(input_paths, dry_run=False):
         errors += 1
 
     excludes_map = load_excludes()
-    globs = exclude_globs(excludes_map)
+    globs = exclude_globs(excludes_map) + extra_excludes
     paths, skipped = filter_excluded(paths, globs)
     for path in skipped:
         print(f"Excluded: {path}")
+
+    if includes:
+        paths, not_included = filter_included(paths, includes)
+        for path in not_included:
+            print(f"Not included: {path}")
 
     # Always drop known binary/image extensions (even without exclude.yaml)
     remaining = []
@@ -712,6 +726,8 @@ def build_parser():
 examples:
   redact config.env                 redact one file → redacted/config.env
   redact -n src/                    dry-run a tree (show matches, no writes)
+  redact --exclude 'vendor/**' src/
+  redact --include '**/*.env' .
   redact a.txt b.env src/           multiple files and/or directories
   redact patterns init              write built-in patterns to {PATTERNS_PATH}
   redact patterns add GOV '\\b...gov\\b'
@@ -721,7 +737,8 @@ examples:
 
 behavior (cwd-relative outputs under redacted/):
   patterns   {PATTERNS_PATH} if present, else built-ins (IP, EMAIL, APIKEY, …)
-  excludes   optional {EXCLUDE_PATH} globs after path expansion
+  excludes   {EXCLUDE_PATH} globs plus optional --exclude (repeatable)
+  includes   optional --include (repeatable); if set, keep only matching paths
   always     skip .git/ and other VCS/venv/cache dirs; skip binary/image
              extensions and non-UTF-8 / NUL-byte files
   errors     log to stderr and continue; exit 1 if any path failed
@@ -739,6 +756,24 @@ behavior (cwd-relative outputs under redacted/):
         '--dry-run',
         action='store_true',
         help='Show matches only; do not write redacted files or dictionary',
+    )
+    parser.add_argument(
+        '-e',
+        '--exclude',
+        action='append',
+        default=[],
+        metavar='GLOB',
+        dest='cli_excludes',
+        help='Exclude paths matching GLOB (repeatable; combined with exclude.yaml)',
+    )
+    parser.add_argument(
+        '-i',
+        '--include',
+        action='append',
+        default=[],
+        metavar='GLOB',
+        dest='cli_includes',
+        help='Only include paths matching GLOB (repeatable; if any, others are skipped)',
     )
     sub = parser.add_subparsers(dest='command')
 
@@ -907,9 +942,32 @@ def main(argv=None):
     # File redaction: parse flags manually so paths are not confused with subcommands.
     dry_run = False
     files = []
-    for arg in argv:
+    cli_excludes = []
+    cli_includes = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
         if arg in ('-n', '--dry-run'):
             dry_run = True
+            i += 1
+        elif arg in ('-e', '--exclude'):
+            if i + 1 >= len(argv):
+                print(f"Option {arg} requires a glob argument.", file=sys.stderr)
+                sys.exit(2)
+            cli_excludes.append(argv[i + 1])
+            i += 2
+        elif arg.startswith('--exclude='):
+            cli_excludes.append(arg.split('=', 1)[1])
+            i += 1
+        elif arg in ('-i', '--include'):
+            if i + 1 >= len(argv):
+                print(f"Option {arg} requires a glob argument.", file=sys.stderr)
+                sys.exit(2)
+            cli_includes.append(argv[i + 1])
+            i += 2
+        elif arg.startswith('--include='):
+            cli_includes.append(arg.split('=', 1)[1])
+            i += 1
         elif arg in ('-h', '--help'):
             parser.print_help()
             return
@@ -922,11 +980,17 @@ def main(argv=None):
             sys.exit(2)
         else:
             files.append(arg)
+            i += 1
 
     if not files:
         parser.print_help()
         sys.exit(1)
-    redact_files(files, dry_run=dry_run)
+    redact_files(
+        files,
+        dry_run=dry_run,
+        extra_excludes=cli_excludes,
+        includes=cli_includes,
+    )
 
 
 if __name__ == "__main__":

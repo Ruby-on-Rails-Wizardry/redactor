@@ -50,7 +50,8 @@ Default git branch: **`master`** (not `main`).
 | **Patterns** | `redacted/patterns.yaml` if present; else built-ins: `IP`, `EMAIL`, `APIKEY`, `TOKEN`, `PASSWORD`, `GOV` (order fixed; EMAIL before GOV) |
 | **Placeholders** | `{NAME}_{8 hex chars}`; same secret → same placeholder for the whole batch |
 | **Dir skips (always)** | Never walk/process path components: `.git`, `.hg`, `.svn`, `.venv`, `venv`, `__pycache__`, `.pytest_cache`, `node_modules`, `.tox`, `.mypy_cache`, `.ruff_cache`, `.eggs`, `dist`, `build`. Also prune source trees named `redacted/` (tool workspace). Explicit `redact .git` yields no files |
-| **Path excludes** | Optional `redacted/exclude.yaml` (name → glob), applied after expansion |
+| **Path excludes** | Optional `redacted/exclude.yaml` (name → glob) plus CLI `-e` / `--exclude GLOB` (repeatable) |
+| **Includes** | Optional `-i` / `--include GLOB` (repeatable); if any set, only matching paths are kept |
 | **Binary skip (always)** | Known binary/image/audio/archive extensions; NUL-byte samples; non-UTF-8 decode |
 | **Dry-run** | `-n` / `--dry-run`: print matches only; no redacted files, no dictionary write |
 | **Errors** | Log to **stderr**, continue other files; exit **1** if any failed; dictionary still saved for successes |
@@ -61,6 +62,8 @@ redact config.env
 redact file1.txt file2.env src/
 redact --dry-run src/
 redact -n config.env
+redact --exclude 'vendor/**' --exclude '*.log' src/
+redact --include '**/*.env' --include '**/*.yml' .
 ```
 
 ### Patterns CLI

@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Development toward **0.2.0** (package version already bumped). Focus: more robust built-in patterns.
+
 ### Added
 
 ### Changed
+
+- Version bump to 0.2.0 (in progress)
 
 ### Fixed
 

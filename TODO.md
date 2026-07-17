@@ -15,6 +15,8 @@ Living list of product and pattern gaps. Check items off as they ship; keep
 - [x] Header-style keys: `X-Api-Key`, `Private-Token`, `Authorization: Basic …`
 - [x] CIDR / prefix or glob allowlist (not only exact strings) for private nets
 - [x] Cut formal **0.2.0** release: finalize CHANGELOG section, tag `v0.2.0`, push
+- [x] Document release process (`docs/RELEASE.md`)
+- [x] Cut formal **0.3.0** release (docs, coverage, process)
 
 ## P3 — niche / polish
 

@@ -7,17 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Development toward **0.3.0**.
-
 ### Added
 
 ### Changed
 
-- Version bump to 0.3.0 (in progress)
-
 ### Fixed
 
 ### Security
+
+## [0.3.0] - 2026-07-17
+
+### Added
+
+- Documented release process in [docs/RELEASE.md](docs/RELEASE.md)
+- Allowlist CLI edge-case tests and batch error-path coverage
+- README limitations / threat-model section (from 0.3.0 prep)
+
+### Changed
+
+- Package version **0.3.0**
+- Docs layout lists `TODO.md`, `CHANGELOG.md`, allowlist rules (exact / glob / CIDR)
 
 ## [0.2.0] - 2026-07-17
 
@@ -77,7 +86,7 @@ Initial public release of the `redact` / `unredact` CLI package.
 
 - Treat `redacted/dictionary.yaml` as sensitive; keep `redacted/` out of version control
 
-[Unreleased]: https://github.com/Ruby-on-Rails-Wizardry/redactor/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Ruby-on-Rails-Wizardry/redactor/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Ruby-on-Rails-Wizardry/redactor/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Ruby-on-Rails-Wizardry/redactor/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Ruby-on-Rails-Wizardry/redactor/releases/tag/v0.1.0
-<!-- When releasing 0.3.0: retarget Unreleased compare to v0.3.0...HEAD and add [0.3.0] section. -->

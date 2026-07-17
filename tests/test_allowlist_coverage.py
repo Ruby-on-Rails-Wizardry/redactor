@@ -149,3 +149,63 @@ def test_oserror_during_redact_continues(redact_mod, workdir, monkeypatch, capsy
     err = capsys.readouterr().err
     assert "gone.txt" in err
     assert Path("redacted/ok.txt").is_file()
+
+
+def test_generic_exception_during_redact_continues(redact_mod, workdir, monkeypatch, capsys):
+    Path("ok.txt").write_text("ip=8.8.8.8\n", encoding="utf-8")
+    Path("bad.txt").write_text("ip=1.2.3.4\n", encoding="utf-8")
+
+    real = redact_mod.redact_file
+
+    def flaky_file(path, **kwargs):
+        if Path(path).name == "bad.txt":
+            raise RuntimeError("boom")
+        return real(path, **kwargs)
+
+    monkeypatch.setattr(redact_mod, "redact_file", flaky_file)
+    monkeypatch.setattr(sys, "argv", ["redact", "ok.txt", "bad.txt"])
+    with pytest.raises(SystemExit) as exc:
+        redact_mod.main()
+    assert exc.value.code == 1
+    assert "boom" in capsys.readouterr().err
+    assert Path("redacted/ok.txt").is_file()
+
+
+def test_file_not_found_mid_batch(redact_mod, workdir, monkeypatch, capsys):
+    Path("ok.txt").write_text("ip=8.8.8.8\n", encoding="utf-8")
+    Path("ghost.txt").write_text("ip=1.1.1.1\n", encoding="utf-8")
+
+    real = redact_mod.redact_file
+
+    def vanish(path, **kwargs):
+        if Path(path).name == "ghost.txt":
+            raise FileNotFoundError("File not found: ghost.txt")
+        return real(path, **kwargs)
+
+    monkeypatch.setattr(redact_mod, "redact_file", vanish)
+    monkeypatch.setattr(sys, "argv", ["redact", "ok.txt", "ghost.txt"])
+    with pytest.raises(SystemExit) as exc:
+        redact_mod.main()
+    assert exc.value.code == 1
+    assert "ghost.txt" in capsys.readouterr().err
+
+
+def test_dry_run_with_errors_still_exits_nonzero(redact_mod, workdir, monkeypatch, capsys):
+    Path("ok.txt").write_text("ip=8.8.8.8\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["redact", "-n", "ok.txt", "missing.txt"])
+    with pytest.raises(SystemExit) as exc:
+        redact_mod.main()
+    assert exc.value.code == 1
+    out = capsys.readouterr()
+    assert "Would redact" in out.out or "Summary:" in out.out
+    assert "missing.txt" in out.err
+
+
+def test_cli_help_and_version_among_file_args(redact_mod, workdir, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["redact", "-h"])
+    redact_mod.main()
+    assert "usage: redact" in capsys.readouterr().out
+
+    monkeypatch.setattr(sys, "argv", ["redact", "-V"])
+    redact_mod.main()
+    assert "0.3.0" in capsys.readouterr().out or "redact" in capsys.readouterr().out

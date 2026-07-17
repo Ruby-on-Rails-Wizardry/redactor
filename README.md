@@ -43,6 +43,11 @@ Default git branch: **`master`** (not `main`).
 
 See [CHANGELOG.md](CHANGELOG.md) for release history (Keep a Changelog).
 
+### Releasing
+
+See **[docs/RELEASE.md](docs/RELEASE.md)** for the full checklist  
+(`test → changelog → version → docs → commit → tag → push → CI`).
+
 ### CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on push and pull requests to `master`:

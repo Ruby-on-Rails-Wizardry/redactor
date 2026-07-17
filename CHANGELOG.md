@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Documented release process in [docs/RELEASE.md](docs/RELEASE.md)
+- Documented release process in [docs/RELEASE.md](docs/RELEASE.md) (includes mandatory GitHub Release via `gh`)
 - Allowlist CLI edge-case tests and batch error-path coverage
 - README limitations / threat-model section (from 0.3.0 prep)
 

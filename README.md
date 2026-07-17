@@ -178,4 +178,4 @@ redacted/
 
 ## License
 
-Internal use only. Consult your component’s guidelines before external distribution.
+Licensed under the [MIT License](LICENSE).

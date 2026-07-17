@@ -3,6 +3,8 @@ name = "redactor"
 version = "0.1.0"
 description = "Redact and restore sensitive values in local files"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "PyYAML>=6.0",

@@ -499,6 +499,23 @@ def collect_matches(content, active_patterns):
     return found
 
 
+def classify_matches(content, active_patterns, reverse_dict):
+    """Split matches into new secrets vs already-mapped (reused) dictionary values.
+
+    Returns (new_matches, reused_matches) where each item is
+    (pattern_name, matched_text) and reused items may include the existing
+    placeholder as a third element for display: (name, text, placeholder).
+    """
+    new_matches = []
+    reused_matches = []
+    for key, match in collect_matches(content, active_patterns):
+        if match in reverse_dict:
+            reused_matches.append((key, match, reverse_dict[match]))
+        else:
+            new_matches.append((key, match))
+    return new_matches, reused_matches
+
+
 class RunStats:
     """Counters for a redact batch (summary line)."""
 
@@ -510,6 +527,9 @@ class RunStats:
         self.skipped_binary = 0
         self.errors = 0
         self.no_matches = 0
+        self.new_secrets = 0
+        self.reused_secrets = 0
+        self.skipped_no_new = 0
 
     def summary_line(self, dry_run=False):
         if dry_run:
@@ -521,6 +541,9 @@ class RunStats:
             parts = [f"redacted={self.redacted}"]
         parts.extend(
             [
+                f"new={self.new_secrets}",
+                f"reused={self.reused_secrets}",
+                f"skipped_no_new={self.skipped_no_new}",
                 f"excluded={self.excluded}",
                 f"not_included={self.not_included}",
                 f"skipped_binary={self.skipped_binary}",
@@ -593,6 +616,7 @@ def redact_file(
     dictionary=None,
     reverse_dict=None,
     dry_run=False,
+    new_only=False,
     out=None,
     stats=None,
 ):
@@ -601,6 +625,10 @@ def redact_file(
     Raises FileNotFoundError if the path is missing. Skips binary files (logs to
     stderr and returns without writing). Other I/O or decode errors propagate
     so batch callers can log and continue.
+
+    When new_only is True, files with no secrets absent from the dictionary are
+    skipped (no write). Known secrets are still replaced with existing placeholders
+    when a file is written because it contains at least one new secret.
     """
     out = out or OutputMode()
     stats = stats if stats is not None else RunStats()
@@ -621,28 +649,53 @@ def redact_file(
     if is_binary_extension(input_path):
         out.error(f"Skipping binary file: {input_path}")
         stats.skipped_binary += 1
-        return dictionary, reverse_dict
+        return dictionary, reverse_dict, "skipped"
 
     if looks_like_binary_content(input_path):
         out.error(f"Skipping binary file: {input_path}")
         stats.skipped_binary += 1
-        return dictionary, reverse_dict
+        return dictionary, reverse_dict, "skipped"
 
     content = read_text_file(input_path)
+    new_matches, reused_matches = classify_matches(
+        content, active_patterns, reverse_dict
+    )
+    stats.new_secrets += len(new_matches)
+    stats.reused_secrets += len(reused_matches)
 
     if dry_run:
-        matches = collect_matches(content, active_patterns)
+        show_new = new_matches
+        show_reused = [] if new_only else reused_matches
+        if new_only and not show_new:
+            out.info(f"Would skip (no new secrets): {input_path}")
+            if reused_matches:
+                out.detail(f"  reused only: {len(reused_matches)}")
+            stats.skipped_no_new += 1
+            if not reused_matches:
+                stats.no_matches += 1
+            return dictionary, reverse_dict, "dry"
+
         out.info(f"Would redact: {input_path}")
-        if not matches:
+        if not show_new and not show_reused:
             out.info("  (no matches)")
             stats.no_matches += 1
         else:
             stats.would_redact += 1
-            for key, match in matches:
-                out.info(f"  {key}: {match}")
-        return dictionary, reverse_dict
+            for key, match in show_new:
+                out.info(f"  NEW {key}: {match}")
+            for item in show_reused:
+                key, match, placeholder = item
+                out.info(f"  REUSED {key}: {match} -> {placeholder}")
+        return dictionary, reverse_dict, "dry"
 
-    matches = collect_matches(content, active_patterns)
+    if new_only and not new_matches:
+        stats.skipped_no_new += 1
+        if not reused_matches:
+            stats.no_matches += 1
+        out.info(f"Skipped (no new secrets): {input_path}")
+        out.detail(f"  reused={len(reused_matches)}")
+        return dictionary, reverse_dict, "skipped"
+
     content = _redact_content(content, active_patterns, dictionary, reverse_dict)
 
     redacted_path = ensure_redacted_path(input_path)
@@ -653,18 +706,20 @@ def redact_file(
         save_dictionary(dictionary)
         out.info(f"Placeholder dictionary updated at: {DICT_PATH}")
 
-    if matches:
+    if new_matches or reused_matches:
         stats.redacted += 1
         out.info(f"Redacted file written to: {redacted_path}")
+        out.detail(f"  new={len(new_matches)} reused={len(reused_matches)}")
         if out.verbose:
-            out.detail(f"  matches: {len(matches)}")
-            for key, match in matches:
-                out.detail(f"  {key}: {match}")
+            for key, match in new_matches:
+                out.detail(f"  NEW {key}: {match}")
+            for key, match, placeholder in reused_matches:
+                out.detail(f"  REUSED {key}: {match} -> {placeholder}")
     else:
         stats.no_matches += 1
         out.info(f"Redacted file written to: {redacted_path}")
         out.detail(f"  (no matches in {input_path})")
-    return dictionary, reverse_dict
+    return dictionary, reverse_dict, "written"
 
 
 def redact_files(
@@ -674,6 +729,7 @@ def redact_files(
     includes=None,
     quiet=False,
     verbose=False,
+    new_only=False,
 ):
     """Redact one or more files or directories, sharing placeholders across the batch.
 
@@ -734,20 +790,22 @@ def redact_files(
 
     dictionary = load_dictionary()
     reverse_dict = {v: k for k, v in dictionary.items()}
-    processed = 0
+    wrote_any = False
 
     for input_path in paths:
         try:
-            redact_file(
+            _d, _r, status = redact_file(
                 input_path,
                 active_patterns=active_patterns,
                 dictionary=dictionary,
                 reverse_dict=reverse_dict,
                 dry_run=dry_run,
+                new_only=new_only,
                 out=out,
                 stats=stats,
             )
-            processed += 1
+            if status == "written":
+                wrote_any = True
         except FileNotFoundError as exc:
             out.error(f"Error: {exc}")
             stats.errors += 1
@@ -769,7 +827,7 @@ def redact_files(
             sys.exit(1)
         return
 
-    if processed:
+    if wrote_any:
         save_dictionary(dictionary)
         out.info(f"Placeholder dictionary updated at: {DICT_PATH}")
 
@@ -826,7 +884,8 @@ behavior (cwd-relative outputs under redacted/):
   always     skip .git/ and other VCS/venv/cache dirs; skip binary/image
              extensions and non-UTF-8 / NUL-byte files
   errors     log to stderr and continue; exit 1 if any path failed
-  dry-run    -n / --dry-run shows matches only (no writes)
+  dry-run    -n / --dry-run shows matches only (no writes); labels NEW vs REUSED
+  new-only   --new-only only act on secrets not already in the dictionary
   output     -q quiet (summary + errors); -v verbose (per-match detail)
 """,
     )
@@ -853,6 +912,14 @@ behavior (cwd-relative outputs under redacted/):
         '--verbose',
         action='store_true',
         help='Extra detail (e.g. match counts and values when redacting)',
+    )
+    parser.add_argument(
+        '--new-only',
+        action='store_true',
+        help=(
+            'Only treat secrets not already in the dictionary as actionable; '
+            'skip files with no new secrets (dry-run lists NEW only)'
+        ),
     )
     parser.add_argument(
         '-e',
@@ -1040,6 +1107,7 @@ def main(argv=None):
     dry_run = False
     quiet = False
     verbose = False
+    new_only = False
     files = []
     cli_excludes = []
     cli_includes = []
@@ -1054,6 +1122,9 @@ def main(argv=None):
             i += 1
         elif arg in ('-v', '--verbose'):
             verbose = True
+            i += 1
+        elif arg == '--new-only':
+            new_only = True
             i += 1
         elif arg in ('-e', '--exclude'):
             if i + 1 >= len(argv):
@@ -1101,6 +1172,7 @@ def main(argv=None):
         includes=cli_includes,
         quiet=quiet,
         verbose=verbose,
+        new_only=new_only,
     )
 
 

@@ -24,3 +24,5 @@ Dry-run / config:
 
 Always skipped: .git/ (and other tool dirs), binary/image extensions, non-UTF-8.
 Branch: master (not main).
+
+Remaining work: see TODO.md

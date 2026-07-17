@@ -1,6 +1,6 @@
 """Pattern matching for sensitive values in redact."""
 
-import re
+from pathlib import Path
 
 import pytest
 
@@ -177,3 +177,74 @@ def test_allowlist_skips_localhost(redact_mod):
         allowlist=redact_mod.allowlist_values(redact_mod.DEFAULT_ALLOWLIST),
     )
     assert matches == [("IP", "8.8.8.8")]
+
+
+def test_ghtoken_pattern(redact_mod):
+    tok = "ghp_" + ("A" * 36)
+    text = f"export GITHUB_TOKEN={tok}"
+    assert list(
+        redact_mod.extract_match_values(redact_mod.DEFAULT_PATTERNS["GHTOKEN"], text)
+    ) == [tok]
+
+
+def test_glpat_pattern(redact_mod):
+    tok = "glpat-" + ("b" * 20)
+    assert list(
+        redact_mod.extract_match_values(redact_mod.DEFAULT_PATTERNS["GLPAT"], text := f"t={tok}")
+    ) == [tok]
+
+
+def test_stripe_pattern(redact_mod):
+    tok = "sk_live_" + ("c" * 24)
+    assert list(
+        redact_mod.extract_match_values(redact_mod.DEFAULT_PATTERNS["STRIPE"], f"key={tok}")
+    ) == [tok]
+    test_tok = "sk_test_" + ("d" * 24)
+    assert list(
+        redact_mod.extract_match_values(redact_mod.DEFAULT_PATTERNS["STRIPE"], test_tok)
+    ) == [test_tok]
+
+
+def test_slack_pattern(redact_mod):
+    tok = "xoxb-1234567890-abcdefghij"
+    assert list(
+        redact_mod.extract_match_values(redact_mod.DEFAULT_PATTERNS["SLACK"], f"bot={tok}")
+    ) == [tok]
+
+
+def test_awssecret_assignment(redact_mod):
+    secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # 40 chars
+    assert len(secret) == 40
+    text = f"aws_secret_access_key = {secret}"
+    assert list(
+        redact_mod.extract_match_values(redact_mod.DEFAULT_PATTERNS["AWSSECRET"], text)
+    ) == [secret]
+
+
+def test_urlcreds_https_and_postgres(redact_mod):
+    https = "https://alice:s3cretpass@example.com/path"
+    assert list(
+        redact_mod.extract_match_values(redact_mod.DEFAULT_PATTERNS["URLCREDS"], https)
+    ) == ["alice:s3cretpass"]
+    pg = "postgres://dbuser:dbpass@db.internal:5432/app"
+    assert list(
+        redact_mod.extract_match_values(redact_mod.DEFAULT_PATTERNS["URLCREDS"], pg)
+    ) == ["dbuser:dbpass"]
+    mongo = "mongodb+srv://u:p@cluster.example.net/db"
+    assert list(
+        redact_mod.extract_match_values(redact_mod.DEFAULT_PATTERNS["URLCREDS"], mongo)
+    ) == ["u:p"]
+
+
+def test_urlcreds_redacts_in_file(redact_mod, workdir, monkeypatch):
+    import sys
+
+    Path("conn.env").write_text(
+        "DATABASE_URL=postgres://app:hunter2secret@db:5432/x\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "argv", ["redact", "conn.env"])
+    redact_mod.main()
+    out = Path("redacted/conn.env").read_text(encoding="utf-8")
+    assert "hunter2secret" not in out
+    assert "app:hunter2secret" not in out

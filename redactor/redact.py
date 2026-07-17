@@ -38,7 +38,23 @@ DEFAULT_PATTERNS = {
         r'\b(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b'
     ),
     'AWSKEY': r'\b(AKIA[0-9A-Z]{16})\b',
+    # AWS secret access key: prefer labeled assignment (40-char base64 is too FP-prone alone).
+    'AWSSECRET': (
+        rf'(?i)\b(?:AWS_SECRET_ACCESS_KEY|aws_secret_access_key)\s*[=:]\s*'
+        rf'(?:"([^"\n]+)"|\'([^\'\n]+)\'|([A-Za-z0-9/+=]{{40}}))'
+    ),
+    # Vendor token prefixes (GitHub, GitLab, Stripe, Slack).
+    'GHTOKEN': r'\b(gh[pousr]_[A-Za-z0-9_]{20,})\b',
+    'GLPAT': r'\b(glpat-[A-Za-z0-9_\-]{20,})\b',
+    'STRIPE': r'\b(sk_(?:live|test)_[A-Za-z0-9]{16,})\b',
+    'SLACK': r'\b(xox[baprs]-[A-Za-z0-9-]{10,})\b',
     'BEARER': r'(?i)\bBearer\s+([A-Za-z0-9._\-+=/]{8,})',
+    # URL / connection-string userinfo: scheme://user:pass@host
+    'URLCREDS': (
+        r'(?i)\b(?:https?|ftp|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|'
+        r'redis|rediss|amqp|amqps|mqtt|mqtts?)://'
+        r'((?:[^:@/\s\'"]+):(?:[^@/\s\'"]+))@'
+    ),
     # Assignment-style credentials (broader key names + =/:)
     'EMAIL': r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b',
     'APIKEY': (

@@ -29,7 +29,7 @@ tests/
 ### Patterns (`redacted/patterns.yaml`)
 
 - CLI: `redact patterns init|list|add|remove`
-- Missing file → `DEFAULT_PATTERNS` (PEM, JWT, AWSKEY, BEARER, EMAIL, APIKEY, TOKEN, PASSWORD, IP, IP6, GOV)
+- Missing file → `DEFAULT_PATTERNS` (PEM, JWT, AWSKEY, AWSSECRET, GHTOKEN, GLPAT, STRIPE, SLACK, BEARER, URLCREDS, EMAIL, APIKEY, TOKEN, PASSWORD, IP, IP6, GOV)
 - Present → that file only; validate with `re.compile`
 - Order = application order; shape patterns first; EMAIL before GOV
 - Assignment patterns use capturing groups for values; engine uses `extract_match_values`

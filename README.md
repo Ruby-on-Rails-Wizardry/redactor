@@ -61,7 +61,7 @@ Same checks as local `mise run test`, plus a quick CLI smoke step.
 |------|------|
 | **Inputs** | One or more files and/or directories |
 | **Output** | `redacted/<path>` (layout preserved) + update `redacted/dictionary.yaml` |
-| **Patterns** | `redacted/patterns.yaml` if present; else built-ins (order fixed): `PEM`, `JWT`, `AWSKEY`, `BEARER`, `EMAIL`, `APIKEY`, `TOKEN`, `PASSWORD`, `IP`, `IP6`, `GOV` |
+| **Patterns** | `redacted/patterns.yaml` if present; else built-ins (order fixed): `PEM`, `JWT`, `AWSKEY`, `AWSSECRET`, `GHTOKEN`, `GLPAT`, `STRIPE`, `SLACK`, `BEARER`, `URLCREDS`, `EMAIL`, `APIKEY`, `TOKEN`, `PASSWORD`, `IP`, `IP6`, `GOV` |
 | **Allowlist** | Exact strings never redacted: `redacted/allowlist.yaml` if present; else built-ins (localhost, `0.0.0.0`, RFC 5737 doc IPs, `::1`) |
 | **Placeholders** | `{NAME}_{8 hex chars}`; same secret → same placeholder for the whole batch; collision-safe generation |
 | **Dir skips (always)** | Never walk/process path components: `.git`, `.hg`, `.svn`, `.venv`, `venv`, `__pycache__`, `.pytest_cache`, `node_modules`, `.tox`, `.mypy_cache`, `.ruff_cache`, `.eggs`, `dist`, `build`. Also prune source trees named `redacted/` (tool workspace). Explicit `redact .git` yields no files |
@@ -105,7 +105,13 @@ Built-in defaults (also what `patterns init` writes):
 | `PEM` | `BEGIN … PRIVATE KEY` blocks (RSA/EC/OPENSSH/…) |
 | `JWT` | three-segment `eyJ…` tokens |
 | `AWSKEY` | AWS access key IDs (`AKIA` + 16 chars) |
+| `AWSSECRET` | `AWS_SECRET_ACCESS_KEY` / `aws_secret_access_key` assignment (40-char secret) |
+| `GHTOKEN` | GitHub tokens `ghp_` / `gho_` / `ghu_` / `ghs_` / `ghr_` |
+| `GLPAT` | GitLab personal access tokens `glpat-…` |
+| `STRIPE` | Stripe secret keys `sk_live_…` / `sk_test_…` |
+| `SLACK` | Slack tokens `xoxb-` / `xoxp-` / … |
 | `BEARER` | `Bearer <token>` (HTTP auth) |
+| `URLCREDS` | `scheme://user:pass@host` (http(s), postgres, mysql, mongodb, redis, amqp, …) |
 | `EMAIL` | email addresses |
 | `APIKEY` | `API_KEY` / `api_key` / `apiKey` with `=` or `:`, quoted or unquoted (≥8) |
 | `TOKEN` | `TOKEN` / `ACCESS_TOKEN` / … with `=` or `:`, quoted or unquoted (≥6) |

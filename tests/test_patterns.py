@@ -174,7 +174,7 @@ def test_allowlist_skips_localhost(redact_mod):
     matches = redact_mod.collect_matches(
         content,
         {"IP": redact_mod.DEFAULT_PATTERNS["IP"]},
-        allowlist=redact_mod.allowlist_values(redact_mod.DEFAULT_ALLOWLIST),
+        allowlist=redact_mod.DEFAULT_ALLOWLIST,
     )
     assert matches == [("IP", "8.8.8.8")]
 
@@ -248,3 +248,44 @@ def test_urlcreds_redacts_in_file(redact_mod, workdir, monkeypatch):
     out = Path("redacted/conn.env").read_text(encoding="utf-8")
     assert "hunter2secret" not in out
     assert "app:hunter2secret" not in out
+
+
+def test_header_api_key_and_private_token(redact_mod):
+    text = "X-Api-Key: super-secret-header-token\nPrivate-Token: gl-token-value-99\n"
+    got = list(
+        redact_mod.extract_match_values(redact_mod.DEFAULT_PATTERNS["HEADER"], text)
+    )
+    assert "super-secret-header-token" in got
+    assert "gl-token-value-99" in got
+
+
+def test_basicauth_header(redact_mod):
+    # "user:pass" base64-ish blob
+    blob = "dXNlcjpwYXNz"
+    text = f"Authorization: Basic {blob}"
+    assert list(
+        redact_mod.extract_match_values(redact_mod.DEFAULT_PATTERNS["BASICAUTH"], text)
+    ) == [blob]
+
+
+def test_allowlist_cidr_and_glob(redact_mod):
+    rules = {
+        'PRIV': '10.0.0.0/8',
+        'MAIL': '*@example.com',
+    }
+    assert redact_mod.is_allowlisted('10.1.2.3', rules)
+    assert not redact_mod.is_allowlisted('8.8.8.8', rules)
+    assert redact_mod.is_allowlisted('user@example.com', rules)
+    assert not redact_mod.is_allowlisted('user@other.com', rules)
+    # exact still works
+    assert redact_mod.allowlist_rule_matches('127.0.0.1', '127.0.0.1')
+
+
+def test_allowlist_skips_doc_net_via_cidr(redact_mod):
+    content = "a=192.0.2.55 b=8.8.4.4"
+    matches = redact_mod.collect_matches(
+        content,
+        {"IP": redact_mod.DEFAULT_PATTERNS["IP"]},
+        allowlist=redact_mod.DEFAULT_ALLOWLIST,
+    )
+    assert matches == [("IP", "8.8.4.4")]

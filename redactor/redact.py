@@ -1,6 +1,8 @@
 """Redact sensitive values from files and manage redaction patterns."""
 
 import argparse
+import fnmatch
+import ipaddress
 import re
 import sys
 import uuid
@@ -49,6 +51,16 @@ DEFAULT_PATTERNS = {
     'STRIPE': r'\b(sk_(?:live|test)_[A-Za-z0-9]{16,})\b',
     'SLACK': r'\b(xox[baprs]-[A-Za-z0-9-]{10,})\b',
     'BEARER': r'(?i)\bBearer\s+([A-Za-z0-9._\-+=/]{8,})',
+    # HTTP headers that commonly carry secrets (value only).
+    'HEADER': (
+        r'(?i)\b(?:X-Api-Key|X-API-Key|Api-Key|API-Key|Private-Token|'
+        r'PRIVATE-TOKEN|X-Auth-Token|X-Access-Token|X-Gitlab-Token|'
+        r'X-CSRF-Token|X-CSRFToken)\s*[:=]\s*'
+        rf'{_assign_value(6)}'
+    ),
+    'BASICAUTH': (
+        r'(?i)\bAuthorization\s*:\s*Basic\s+([A-Za-z0-9+/=]{8,})'
+    ),
     # URL / connection-string userinfo: scheme://user:pass@host
     'URLCREDS': (
         r'(?i)\b(?:https?|ftp|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|'
@@ -88,6 +100,7 @@ DEFAULT_PATTERNS = {
 }
 
 # Safe values never redacted when using built-in allowlist (or after allowlist init).
+# Entries may be exact strings, globs (* ?), or IPv4/IPv6 CIDR (e.g. 10.0.0.0/8).
 DEFAULT_ALLOWLIST = {
     'LOCALHOST_V4': '127.0.0.1',
     'UNSPECIFIED_V4': '0.0.0.0',
@@ -96,6 +109,10 @@ DEFAULT_ALLOWLIST = {
     'DOC_TEST_NET_1': '192.0.2.1',
     'DOC_TEST_NET_2': '198.51.100.1',
     'DOC_TEST_NET_3': '203.0.113.1',
+    # Documentation / test nets (RFC 5737) as CIDR — optional broader skip
+    'DOC_TEST_NET_1_CIDR': '192.0.2.0/24',
+    'DOC_TEST_NET_2_CIDR': '198.51.100.0/24',
+    'DOC_TEST_NET_3_CIDR': '203.0.113.0/24',
 }
 
 # Extensions always treated as binary/image (skipped even without exclude.yaml).
@@ -577,7 +594,10 @@ def cmd_exclude_remove(args):
 
 
 def validate_allowlist(data):
-    """Return validated ordered dict of name -> exact string, or raise ValueError."""
+    """Return validated ordered dict of name -> rule string, or raise ValueError.
+
+    Rules may be exact strings, shell-style globs (* ?), or CIDR networks.
+    """
     if not isinstance(data, dict):
         raise ValueError("allowlist config must be a mapping of NAME: string")
     if not data:
@@ -589,8 +609,51 @@ def validate_allowlist(data):
             raise ValueError(f"invalid allowlist name: {name!r}")
         if not isinstance(value, str) or value == '':
             raise ValueError(f"allowlist {name!r} must be a non-empty string")
-        validated[name.strip()] = value
+        rule = value.strip()
+        # Validate CIDR entries early so bad config fails at load time.
+        if '/' in rule and not any(ch in rule for ch in '*?['):
+            try:
+                ipaddress.ip_network(rule, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"allowlist {name!r} is not a valid CIDR or IP network: {exc}"
+                ) from exc
+        validated[name.strip()] = rule
     return validated
+
+
+def allowlist_rule_matches(value: str, rule: str) -> bool:
+    """True if *value* is covered by an allowlist *rule* (exact, glob, or CIDR)."""
+    if value == rule:
+        return True
+    # Glob (path-style or simple shell patterns)
+    if any(ch in rule for ch in '*?['):
+        if fnmatch.fnmatch(value, rule):
+            return True
+    # CIDR / network
+    if '/' in rule:
+        try:
+            network = ipaddress.ip_network(rule, strict=False)
+            addr = ipaddress.ip_address(value)
+            if addr in network:
+                return True
+        except ValueError:
+            pass
+    return False
+
+
+def is_allowlisted(value: str, allowlist) -> bool:
+    """True if value matches any allowlist rule.
+
+    *allowlist* may be a dict of name→rule, or an iterable of rule strings.
+    """
+    if not allowlist:
+        return False
+    rules = allowlist.values() if isinstance(allowlist, dict) else allowlist
+    for rule in rules:
+        if allowlist_rule_matches(value, rule):
+            return True
+    return False
 
 
 def load_allowlist_file():
@@ -621,10 +684,10 @@ def load_allowlist():
 
 
 def allowlist_values(allowlist_map=None):
-    """Set of exact strings that must never be redacted."""
+    """Return allowlist map (name → rule). Kept for callers; prefer is_allowlisted()."""
     if allowlist_map is None:
-        allowlist_map = load_allowlist()
-    return set(allowlist_map.values())
+        return load_allowlist()
+    return allowlist_map
 
 
 def cmd_allowlist_init(args):
@@ -734,11 +797,10 @@ def extract_match_values(pattern, content):
 
 def collect_matches(content, active_patterns, allowlist=None):
     """Return list of (pattern_name, matched_text) without mutating content."""
-    denied = set(allowlist or ())
     found = []
     for key, pattern in active_patterns.items():
         for match in sorted(set(extract_match_values(pattern, content))):
-            if match in denied:
+            if is_allowlisted(match, allowlist):
                 continue
             found.append((key, match))
     return found
@@ -843,10 +905,9 @@ def read_text_file(path: Path) -> str:
 
 def _redact_content(content, active_patterns, dictionary, reverse_dict, allowlist=None):
     """Apply patterns to content, updating dictionary/reverse_dict in place."""
-    denied = set(allowlist or ())
     for key, pattern in active_patterns.items():
         for match in set(extract_match_values(pattern, content)):
-            if match in denied:
+            if is_allowlisted(match, allowlist):
                 continue
             if match in reverse_dict:
                 placeholder = reverse_dict[match]
@@ -895,7 +956,7 @@ def redact_file(
     if reverse_dict is None:
         reverse_dict = {v: k for k, v in dictionary.items()}
     if allowlist is None:
-        allowlist = allowlist_values()
+        allowlist = load_allowlist()
 
     if is_binary_extension(input_path):
         out.error(f"Skipping binary file: {input_path}")
@@ -1043,7 +1104,7 @@ def redact_files(
 
     dictionary = load_dictionary()
     reverse_dict = {v: k for k, v in dictionary.items()}
-    allowlist = allowlist_values()
+    allowlist = load_allowlist()
     wrote_any = False
 
     for input_path in paths:
@@ -1315,9 +1376,10 @@ behavior (cwd-relative outputs under redacted/):
         'allowlist',
         help='List, add, remove, or initialize never-redact string allowlist',
         description=(
-            f'Manage {ALLOWLIST_PATH} (name → exact string). Matching values are '
-            f'never redacted. If the file is missing, built-in defaults apply '
-            f'(localhost and RFC 5737 documentation IPs).'
+            f'Manage {ALLOWLIST_PATH} (name → rule). Rules may be exact strings, '
+            f'globs (* ?), or CIDR networks (e.g. 10.0.0.0/8). Matching values '
+            f'are never redacted. If the file is missing, built-in defaults apply '
+            f'(localhost and RFC 5737 documentation IPs/CIDRs).'
         ),
     )
     allow_sub = allow_parser.add_subparsers(dest='allowlist_command', required=True)
@@ -1349,7 +1411,10 @@ behavior (cwd-relative outputs under redacted/):
         help='Add or update an allowlist string (seeds defaults if file missing)',
     )
     a_add.add_argument('name', help='Entry name (e.g. LOCALHOST_V4)')
-    a_add.add_argument('value', help='Exact string that must never be redacted')
+    a_add.add_argument(
+        'value',
+        help='Exact string, glob (* ?), or CIDR that must never be redacted',
+    )
     a_add.set_defaults(func=cmd_allowlist_add)
 
     a_remove = allow_sub.add_parser(

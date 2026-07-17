@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -46,3 +47,31 @@ def test_redact_respects_default_allowlist(redact_mod, workdir, monkeypatch):
     text = Path("redacted/net.txt").read_text(encoding="utf-8")
     assert "127.0.0.1" in text
     assert "8.8.8.8" not in text
+
+
+def test_allowlist_add_cidr_and_redact(redact_mod, workdir, monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["redact", "allowlist", "add", "PRIV10", "10.0.0.0/8"],
+    )
+    redact_mod.main()
+    Path("net.txt").write_text("a=10.9.8.7 b=8.8.8.8\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["redact", "net.txt"])
+    redact_mod.main()
+    text = Path("redacted/net.txt").read_text(encoding="utf-8")
+    assert "10.9.8.7" in text
+    assert "8.8.8.8" not in text
+
+
+def test_allowlist_rejects_bad_cidr(redact_mod, workdir, monkeypatch, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["redact", "allowlist", "add", "BAD", "10.0.0.0/99"],
+    )
+    with pytest.raises(SystemExit) as exc:
+        redact_mod.main()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "CIDR" in err or "network" in err or "valid" in err

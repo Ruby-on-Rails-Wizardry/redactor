@@ -61,8 +61,8 @@ Same checks as local `mise run test`, plus a quick CLI smoke step.
 |------|------|
 | **Inputs** | One or more files and/or directories |
 | **Output** | `redacted/<path>` (layout preserved) + update `redacted/dictionary.yaml` |
-| **Patterns** | `redacted/patterns.yaml` if present; else built-ins (order fixed): `PEM`, `JWT`, `AWSKEY`, `AWSSECRET`, `GHTOKEN`, `GLPAT`, `STRIPE`, `SLACK`, `BEARER`, `URLCREDS`, `EMAIL`, `APIKEY`, `TOKEN`, `PASSWORD`, `IP`, `IP6`, `GOV` |
-| **Allowlist** | Exact strings never redacted: `redacted/allowlist.yaml` if present; else built-ins (localhost, `0.0.0.0`, RFC 5737 doc IPs, `::1`) |
+| **Patterns** | `redacted/patterns.yaml` if present; else built-ins (order fixed): `PEM`, `JWT`, `AWSKEY`, `AWSSECRET`, `GHTOKEN`, `GLPAT`, `STRIPE`, `SLACK`, `BEARER`, `HEADER`, `BASICAUTH`, `URLCREDS`, `EMAIL`, `APIKEY`, `TOKEN`, `PASSWORD`, `IP`, `IP6`, `GOV` |
+| **Allowlist** | Rules never redacted: exact string, glob (`* ?`), or CIDR (`10.0.0.0/8`). File `redacted/allowlist.yaml` if present; else built-ins (localhost, doc IPs/CIDRs, `::1`) |
 | **Placeholders** | `{NAME}_{8 hex chars}`; same secret → same placeholder for the whole batch; collision-safe generation |
 | **Dir skips (always)** | Never walk/process path components: `.git`, `.hg`, `.svn`, `.venv`, `venv`, `__pycache__`, `.pytest_cache`, `node_modules`, `.tox`, `.mypy_cache`, `.ruff_cache`, `.eggs`, `dist`, `build`. Also prune source trees named `redacted/` (tool workspace). Explicit `redact .git` yields no files |
 | **Path excludes** | Optional `redacted/exclude.yaml` (name → glob) plus CLI `-e` / `--exclude GLOB` (repeatable) |
@@ -111,6 +111,8 @@ Built-in defaults (also what `patterns init` writes):
 | `STRIPE` | Stripe secret keys `sk_live_…` / `sk_test_…` |
 | `SLACK` | Slack tokens `xoxb-` / `xoxp-` / … |
 | `BEARER` | `Bearer <token>` (HTTP auth) |
+| `HEADER` | `X-Api-Key`, `Private-Token`, `X-Auth-Token`, … header values |
+| `BASICAUTH` | `Authorization: Basic <base64>` |
 | `URLCREDS` | `scheme://user:pass@host` (http(s), postgres, mysql, mongodb, redis, amqp, …) |
 | `EMAIL` | email addresses |
 | `APIKEY` | `API_KEY` / `api_key` / `apiKey` with `=` or `:`, quoted or unquoted (≥8) |
@@ -122,12 +124,19 @@ Built-in defaults (also what `patterns init` writes):
 
 ### Allowlist CLI
 
-Exact strings that must **never** be redacted. File: `redacted/allowlist.yaml` (`NAME: string`).
+Values that must **never** be redacted. File: `redacted/allowlist.yaml` (`NAME: rule`).
+
+Rules may be:
+
+- **exact** — `127.0.0.1`
+- **glob** — `*@example.com`, `10.0.*`
+- **CIDR** — `10.0.0.0/8`, `192.0.2.0/24`
 
 ```bash
 redact allowlist init | init --force
 redact allowlist list | list --yaml
-redact allowlist add NAME 'exact-string'   # seeds built-ins if file missing
+redact allowlist add NAME 'exact-or-glob-or-cidr'   # seeds built-ins if file missing
+redact allowlist add PRIV10 '10.0.0.0/8'
 redact allowlist remove NAME [--ignore-missing]
 ```
 

@@ -12,9 +12,9 @@ Living list of product and pattern gaps. Check items off as they ship; keep
 
 ## P2 — headers, allowlist power, release
 
-- [ ] Header-style keys: `X-Api-Key`, `Private-Token`, `Authorization` variants beyond Bearer
-- [ ] CIDR / prefix or glob allowlist (not only exact strings) for private nets
-- [ ] Cut formal **0.2.0** release: finalize CHANGELOG section, tag `v0.2.0`, push
+- [x] Header-style keys: `X-Api-Key`, `Private-Token`, `Authorization: Basic …`
+- [x] CIDR / prefix or glob allowlist (not only exact strings) for private nets
+- [x] Cut formal **0.2.0** release: finalize CHANGELOG section, tag `v0.2.0`, push
 
 ## P3 — niche / polish
 

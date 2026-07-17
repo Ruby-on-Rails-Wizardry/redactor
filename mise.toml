@@ -1,0 +1,35 @@
+min_version = "2024.9.5"
+
+[tools]
+python = "3.12"
+uv = "latest"
+
+[env]
+# Auto-create and activate a project virtualenv
+_.python.venv = { path = ".venv", create = true }
+
+[tasks.install]
+description = "Install package (editable) and dev deps into the project venv"
+alias = "i"
+run = "uv pip install -e '.[dev]'"
+
+[tasks.install-cli]
+description = "Install redact/unredact on PATH for use from any directory"
+run = "uv tool install --force --editable ."
+
+[tasks.uninstall-cli]
+description = "Remove globally installed redact/unredact tools"
+run = "uv tool uninstall redactor"
+
+[tasks.setup]
+description = "Install tools, project deps, and CLI on PATH"
+run = ["mise install", "mise run install", "mise run install-cli"]
+
+[tasks.test]
+description = "Run unit tests with coverage (fails under 90%)"
+alias = "t"
+run = "pytest --cov=redactor --cov-report=term-missing"
+
+[tasks.test-fast]
+description = "Run unit tests without coverage"
+run = "pytest"

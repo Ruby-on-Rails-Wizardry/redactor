@@ -1,0 +1,17 @@
+Install CLI (available from anywhere):
+  mise run setup
+  # or: uv tool install --force --editable .
+
+Refresh / uninstall CLI:
+  mise run install-cli
+  mise run uninstall-cli
+
+Dev:
+  mise run install
+  mise run test          # coverage gate ≥90%
+  mise run test-fast
+
+Help:
+  redact help
+  redact help patterns
+  unredact -h

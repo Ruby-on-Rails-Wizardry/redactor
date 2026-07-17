@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Dev convenience wrapper; prefer the installed `redact` command on PATH."""
+
+from redactor.redact import main
+
+if __name__ == "__main__":
+    main()

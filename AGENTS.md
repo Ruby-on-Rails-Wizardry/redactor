@@ -50,8 +50,11 @@ tests/
 ### Redact batch
 
 - Multi-file/dir share one dictionary for the run
-- `-n` / `--dry-run`: matches only, no writes
-- Errors → stderr, continue; exit 1 if any error; save dictionary if anything succeeded
+- `-e`/`--exclude`, `-i`/`--include` (repeatable globs) combine with exclude.yaml
+- `-q`/`--quiet` (summary only), `-v`/`--verbose` (match detail); always print `Summary:`
+- `-n` / `--dry-run`: matches only, no writes; labels **NEW** vs **REUSED**
+- `--new-only`: skip files with no secrets absent from the dictionary
+- Errors → stderr, continue; exit 1 if any error; save dictionary if anything written
 - On write: `ensure_redacted_gitignored()`
 
 ### Unredact batch

@@ -3,11 +3,12 @@
 Living list of product and pattern gaps. Check items off as they ship; keep
 [CHANGELOG.md](CHANGELOG.md) `[Unreleased]` in sync for user-visible work.
 
-## P1 — secret shapes & URLs (in progress)
+## P1 — secret shapes & URLs
 
 - [x] Cloud/token prefixes: GitHub `ghp_`/`gho_`/…, Stripe `sk_live_`/`sk_test_`, Slack `xox…`
 - [x] AWS secret access key via assignment (`AWS_SECRET_ACCESS_KEY=…`)
 - [x] URL userinfo + DB-style connection strings (`scheme://user:pass@host`)
+- [x] GitLab `glpat-…` tokens
 
 ## P2 — headers, allowlist power, release
 

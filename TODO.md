@@ -25,7 +25,7 @@ Living list of product and pattern gaps. Check items off as they ship; keep
 - [ ] Stdin/stdout redaction mode
 - [ ] `unredact version` parity with `redact`
 - [ ] Dictionary file mode `0600` on write
-- [ ] Threat-model / limitations section in README
+- [x] Threat-model / limitations section in README
 - [ ] CI lint job (e.g. ruff); optional multi-Python matrix
 
 ## Engine / correctness (backlog)
@@ -37,4 +37,4 @@ Living list of product and pattern gaps. Check items off as they ship; keep
 ## Ops
 
 - [ ] Ensure remote CI green after push
-- [ ] Coverage headroom if new code lands near the 90% floor
+- [x] Coverage headroom if new code lands near the 90% floor (~93%+)

@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Development toward **0.3.0**.
+
 ### Added
 
 ### Changed
+
+- Version bump to 0.3.0 (in progress)
 
 ### Fixed
 
@@ -76,3 +80,4 @@ Initial public release of the `redact` / `unredact` CLI package.
 [Unreleased]: https://github.com/Ruby-on-Rails-Wizardry/redactor/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/Ruby-on-Rails-Wizardry/redactor/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Ruby-on-Rails-Wizardry/redactor/releases/tag/v0.1.0
+<!-- When releasing 0.3.0: retarget Unreleased compare to v0.3.0...HEAD and add [0.3.0] section. -->

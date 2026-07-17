@@ -1195,8 +1195,8 @@ examples:
 
 behavior (cwd-relative outputs under redacted/):
   patterns   {PATTERNS_PATH} if present, else built-ins (PEM, JWT, AWSKEY,
-             BEARER, EMAIL, APIKEY, TOKEN, PASSWORD, IP, IP6, GOV)
-  allowlist  {ALLOWLIST_PATH} if present, else built-in safe strings
+             tokens, HEADER, BASICAUTH, URLCREDS, EMAIL, APIKEY, …, IP, IP6, GOV)
+  allowlist  {ALLOWLIST_PATH} if present, else built-ins (exact/glob/CIDR)
   excludes   {EXCLUDE_PATH} globs plus optional --exclude (repeatable)
   includes   optional --include (repeatable); if set, keep only matching paths
   always     skip .git/ and other VCS/venv/cache dirs; skip binary/image

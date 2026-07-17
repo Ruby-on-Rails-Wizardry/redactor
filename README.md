@@ -180,6 +180,7 @@ redact help
 redact help patterns
 redact help patterns add
 redact help exclude
+redact help allowlist
 redact version | -V | --version
 unredact -h | --help
 ```
@@ -193,6 +194,8 @@ redactor/                 # installable package
   paths.py                # expand/walk; ALWAYS_SKIP_DIR_NAMES (.git, …)
 bin/                      # thin wrappers
 tests/
+TODO.md                   # remaining product gaps
+CHANGELOG.md
 pyproject.toml
 mise.toml
 README.md
@@ -202,7 +205,7 @@ AGENTS.md
 redacted/
   patterns.yaml           # optional
   exclude.yaml            # optional
-  allowlist.yaml          # optional never-redact strings
+  allowlist.yaml          # optional never-redact rules (exact / glob / CIDR)
   dictionary.yaml         # sensitive
   …                       # mirrored redacted files
 ```
@@ -211,7 +214,19 @@ redacted/
 
 - **`redacted/dictionary.yaml` is sensitive** — do not commit or share unless authorized.
 - **`redacted/` is gitignored**; `redact` also appends `redacted/` to `.gitignore` when writing under `redacted/`.
-- Patterns/excludes are config, not secrets; the dictionary is.
+- Patterns/excludes/allowlist are config, not secrets; the dictionary is.
+
+## Limitations (threat model)
+
+`redact` is a **regex heuristic**, not a DLP product. It will not catch:
+
+- Secrets only inside images, PDFs, or other binary formats (binaries are skipped)
+- Encrypted or compressed archives without extraction
+- Custom encodings, steganography, or high-entropy strings with no known shape
+- Every possible cloud vendor token format (see [TODO.md](TODO.md) for backlog)
+- Context that looks public but is still sensitive for your org (tune allowlist carefully)
+
+Always review dry-run output (`redact -n …`) before sharing redacted trees. Unredaction requires the dictionary—losing it means secrets cannot be restored from placeholders alone.
 
 ## License
 

@@ -152,8 +152,22 @@ GITIGNORE_PATH = Path('.gitignore')
 REDACTED_GITIGNORE_ENTRY = 'redacted/'
 
 
-def generate_placeholder(prefix):
-    return f"{prefix}_{uuid.uuid4().hex[:8]}"
+def generate_placeholder(prefix, existing=None, max_attempts=64):
+    """Return a unique placeholder like PREFIX_a1b2c3d4.
+
+    If *existing* is provided (set/dict of keys already in use), regenerate on
+    collision. Raises RuntimeError if uniqueness cannot be achieved within
+    max_attempts (extremely unlikely with 8 hex digits).
+    """
+    existing = existing if existing is not None else ()
+    for _ in range(max_attempts):
+        placeholder = f"{prefix}_{uuid.uuid4().hex[:8]}"
+        if placeholder not in existing:
+            return placeholder
+    raise RuntimeError(
+        f"Unable to generate unique placeholder for prefix {prefix!r} "
+        f"after {max_attempts} attempts"
+    )
 
 
 def redacted_in_gitignore(content):
@@ -603,7 +617,7 @@ def _redact_content(content, active_patterns, dictionary, reverse_dict):
             if match in reverse_dict:
                 placeholder = reverse_dict[match]
             else:
-                placeholder = generate_placeholder(key)
+                placeholder = generate_placeholder(key, existing=dictionary)
                 dictionary[placeholder] = match
                 reverse_dict[match] = placeholder
             content = content.replace(match, placeholder)

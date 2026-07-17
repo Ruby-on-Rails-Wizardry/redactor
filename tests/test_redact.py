@@ -21,6 +21,57 @@ def test_generate_placeholder_unique(redact_mod):
     assert a != b
 
 
+def test_generate_placeholder_avoids_existing_keys(redact_mod, monkeypatch):
+    # Force the first UUID hex to collide with an existing key, then succeed.
+    seq = iter(["deadbeefcafebabe", "0123456789abcdef"])
+
+    class FakeUUID:
+        def __init__(self, hex):
+            self.hex = hex
+
+    def fake_uuid4():
+        return FakeUUID(next(seq))
+
+    monkeypatch.setattr(redact_mod.uuid, "uuid4", fake_uuid4)
+    existing = {"IP_deadbeef": "1.1.1.1"}
+    placeholder = redact_mod.generate_placeholder("IP", existing=existing)
+    assert placeholder == "IP_01234567"
+    assert placeholder not in existing
+
+
+def test_generate_placeholder_raises_after_max_attempts(redact_mod, monkeypatch):
+    class FakeUUID:
+        hex = "aaaaaaaaaaaaaaaa"
+
+    monkeypatch.setattr(redact_mod.uuid, "uuid4", lambda: FakeUUID())
+    existing = {"EMAIL_aaaaaaaa": "a@b.co"}
+    with pytest.raises(RuntimeError, match="unique placeholder"):
+        redact_mod.generate_placeholder("EMAIL", existing=existing, max_attempts=3)
+
+
+def test_redact_content_skips_duplicate_placeholder_keys(redact_mod, monkeypatch):
+    """Integration: collision with an existing dictionary key still produces unique keys."""
+    seq = iter(["bbbbbbbbcccccccc", "ddddddddeeeeeeee"])
+
+    class FakeUUID:
+        def __init__(self, hex):
+            self.hex = hex
+
+    monkeypatch.setattr(redact_mod.uuid, "uuid4", lambda: FakeUUID(next(seq)))
+    dictionary = {"IP_bbbbbbbb": "9.9.9.9"}
+    reverse = {"9.9.9.9": "IP_bbbbbbbb"}
+    content = redact_mod._redact_content(
+        "host 10.0.0.1\n",
+        {"IP": redact_mod.DEFAULT_PATTERNS["IP"]},
+        dictionary,
+        reverse,
+    )
+    assert "10.0.0.1" not in content
+    assert "IP_dddddddd" in content
+    assert "IP_bbbbbbbb" in dictionary
+    assert dictionary["IP_dddddddd"] == "10.0.0.1"
+
+
 def test_ensure_redacted_path_creates_parents(redact_mod, workdir):
     original = Path("nested/dir/file.txt")
     redacted = redact_mod.ensure_redacted_path(original)

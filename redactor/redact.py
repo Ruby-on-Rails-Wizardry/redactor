@@ -494,6 +494,58 @@ def collect_matches(content, active_patterns):
     return found
 
 
+class RunStats:
+    """Counters for a redact batch (summary line)."""
+
+    def __init__(self):
+        self.redacted = 0
+        self.would_redact = 0
+        self.excluded = 0
+        self.not_included = 0
+        self.skipped_binary = 0
+        self.errors = 0
+        self.no_matches = 0
+
+    def summary_line(self, dry_run=False):
+        if dry_run:
+            parts = [
+                f"would_redact={self.would_redact}",
+                f"no_matches={self.no_matches}",
+            ]
+        else:
+            parts = [f"redacted={self.redacted}"]
+        parts.extend(
+            [
+                f"excluded={self.excluded}",
+                f"not_included={self.not_included}",
+                f"skipped_binary={self.skipped_binary}",
+                f"errors={self.errors}",
+            ]
+        )
+        return "Summary: " + ", ".join(parts)
+
+
+class OutputMode:
+    """quiet / default / verbose printing for redact runs."""
+
+    def __init__(self, quiet=False, verbose=False):
+        if quiet and verbose:
+            raise ValueError("Cannot combine --quiet and --verbose")
+        self.quiet = quiet
+        self.verbose = verbose
+
+    def info(self, msg):
+        if not self.quiet:
+            print(msg)
+
+    def detail(self, msg):
+        if self.verbose and not self.quiet:
+            print(msg)
+
+    def error(self, msg):
+        print(msg, file=sys.stderr)
+
+
 def is_binary_extension(path: Path) -> bool:
     """True if path has a known binary/image/audio/archive extension."""
     return path.suffix.lower() in BINARY_EXTENSIONS
@@ -532,6 +584,8 @@ def redact_file(
     dictionary=None,
     reverse_dict=None,
     dry_run=False,
+    out=None,
+    stats=None,
 ):
     """Redact a single file. Optionally reuse shared patterns/dictionary for batch runs.
 
@@ -539,6 +593,8 @@ def redact_file(
     stderr and returns without writing). Other I/O or decode errors propagate
     so batch callers can log and continue.
     """
+    out = out or OutputMode()
+    stats = stats if stats is not None else RunStats()
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"File not found: {input_path}")
@@ -547,35 +603,37 @@ def redact_file(
     if active_patterns is None:
         active_patterns = load_patterns()
         if not active_patterns:
-            print(
-                "Warning: no patterns configured; writing file unchanged.",
-                file=sys.stderr,
-            )
+            out.error("Warning: no patterns configured; writing file unchanged.")
     if dictionary is None:
         dictionary = load_dictionary()
     if reverse_dict is None:
         reverse_dict = {v: k for k, v in dictionary.items()}
 
     if is_binary_extension(input_path):
-        print(f"Skipping binary file: {input_path}", file=sys.stderr)
+        out.error(f"Skipping binary file: {input_path}")
+        stats.skipped_binary += 1
         return dictionary, reverse_dict
 
     if looks_like_binary_content(input_path):
-        print(f"Skipping binary file: {input_path}", file=sys.stderr)
+        out.error(f"Skipping binary file: {input_path}")
+        stats.skipped_binary += 1
         return dictionary, reverse_dict
 
     content = read_text_file(input_path)
 
     if dry_run:
         matches = collect_matches(content, active_patterns)
-        print(f"Would redact: {input_path}")
+        out.info(f"Would redact: {input_path}")
         if not matches:
-            print("  (no matches)")
+            out.info("  (no matches)")
+            stats.no_matches += 1
         else:
+            stats.would_redact += 1
             for key, match in matches:
-                print(f"  {key}: {match}")
+                out.info(f"  {key}: {match}")
         return dictionary, reverse_dict
 
+    matches = collect_matches(content, active_patterns)
     content = _redact_content(content, active_patterns, dictionary, reverse_dict)
 
     redacted_path = ensure_redacted_path(input_path)
@@ -584,9 +642,19 @@ def redact_file(
 
     if owns_dictionary:
         save_dictionary(dictionary)
-        print(f"Placeholder dictionary updated at: {DICT_PATH}")
+        out.info(f"Placeholder dictionary updated at: {DICT_PATH}")
 
-    print(f"Redacted file written to: {redacted_path}")
+    if matches:
+        stats.redacted += 1
+        out.info(f"Redacted file written to: {redacted_path}")
+        if out.verbose:
+            out.detail(f"  matches: {len(matches)}")
+            for key, match in matches:
+                out.detail(f"  {key}: {match}")
+    else:
+        stats.no_matches += 1
+        out.info(f"Redacted file written to: {redacted_path}")
+        out.detail(f"  (no matches in {input_path})")
     return dictionary, reverse_dict
 
 
@@ -595,6 +663,8 @@ def redact_files(
     dry_run=False,
     extra_excludes=None,
     includes=None,
+    quiet=False,
+    verbose=False,
 ):
     """Redact one or more files or directories, sharing placeholders across the batch.
 
@@ -604,51 +674,54 @@ def redact_files(
     Per-file errors are logged to stderr; processing continues. Exit status is
     non-zero if any path failed.
     """
+    out = OutputMode(quiet=quiet, verbose=verbose)
+    stats = RunStats()
     extra_excludes = list(extra_excludes or [])
     includes = list(includes or [])
 
     paths, missing = expand_paths(input_paths)
-    errors = 0
     for path in missing:
-        print(f"Error: File not found: {path}", file=sys.stderr)
-        errors += 1
+        out.error(f"Error: File not found: {path}")
+        stats.errors += 1
 
     excludes_map = load_excludes()
     globs = exclude_globs(excludes_map) + extra_excludes
     paths, skipped = filter_excluded(paths, globs)
     for path in skipped:
-        print(f"Excluded: {path}")
+        stats.excluded += 1
+        out.info(f"Excluded: {path}")
+        out.detail(f"  (matched exclude glob)")
 
     if includes:
         paths, not_included = filter_included(paths, includes)
         for path in not_included:
-            print(f"Not included: {path}")
+            stats.not_included += 1
+            out.info(f"Not included: {path}")
 
     # Always drop known binary/image extensions (even without exclude.yaml)
     remaining = []
     for path in paths:
         if is_binary_extension(path):
-            print(f"Skipping binary file: {path}", file=sys.stderr)
+            out.error(f"Skipping binary file: {path}")
+            stats.skipped_binary += 1
         else:
             remaining.append(path)
     paths = remaining
 
     if not paths:
-        if errors:
-            print(f"Completed with {errors} error(s).", file=sys.stderr)
+        out.info(stats.summary_line(dry_run=dry_run))
+        if stats.errors:
+            out.error(f"Completed with {stats.errors} error(s).")
             sys.exit(1)
-        print("No files to redact.", file=sys.stderr)
+        out.error("No files to redact.")
         sys.exit(1)
 
     active_patterns = load_patterns()
     if not active_patterns:
-        print(
-            "Warning: no patterns configured; writing files unchanged.",
-            file=sys.stderr,
-        )
+        out.error("Warning: no patterns configured; writing files unchanged.")
 
     if dry_run:
-        print(f"Dry run: {len(paths)} file(s) (no writes)")
+        out.info(f"Dry run: {len(paths)} file(s) (no writes)")
 
     dictionary = load_dictionary()
     reverse_dict = {v: k for k, v in dictionary.items()}
@@ -662,36 +735,38 @@ def redact_files(
                 dictionary=dictionary,
                 reverse_dict=reverse_dict,
                 dry_run=dry_run,
+                out=out,
+                stats=stats,
             )
             processed += 1
         except FileNotFoundError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            errors += 1
+            out.error(f"Error: {exc}")
+            stats.errors += 1
         except UnicodeDecodeError:
-            print(
-                f"Skipping binary/non-UTF-8 file: {input_path}",
-                file=sys.stderr,
-            )
+            out.error(f"Skipping binary/non-UTF-8 file: {input_path}")
+            stats.skipped_binary += 1
         except OSError as exc:
-            print(f"Error: {input_path}: {exc}", file=sys.stderr)
-            errors += 1
+            out.error(f"Error: {input_path}: {exc}")
+            stats.errors += 1
         except Exception as exc:  # noqa: BLE001 — keep batch going
-            print(f"Error: {input_path}: {exc}", file=sys.stderr)
-            errors += 1
+            out.error(f"Error: {input_path}: {exc}")
+            stats.errors += 1
 
     if dry_run:
-        print("Dry run complete; no files or dictionary written.")
-        if errors:
-            print(f"Completed with {errors} error(s).", file=sys.stderr)
+        out.info("Dry run complete; no files or dictionary written.")
+        out.info(stats.summary_line(dry_run=True))
+        if stats.errors:
+            out.error(f"Completed with {stats.errors} error(s).")
             sys.exit(1)
         return
 
     if processed:
         save_dictionary(dictionary)
-        print(f"Placeholder dictionary updated at: {DICT_PATH}")
+        out.info(f"Placeholder dictionary updated at: {DICT_PATH}")
 
-    if errors:
-        print(f"Completed with {errors} error(s).", file=sys.stderr)
+    out.info(stats.summary_line(dry_run=False))
+    if stats.errors:
+        out.error(f"Completed with {stats.errors} error(s).")
         sys.exit(1)
 
 
@@ -743,6 +818,7 @@ behavior (cwd-relative outputs under redacted/):
              extensions and non-UTF-8 / NUL-byte files
   errors     log to stderr and continue; exit 1 if any path failed
   dry-run    -n / --dry-run shows matches only (no writes)
+  output     -q quiet (summary + errors); -v verbose (per-match detail)
 """,
     )
     parser.add_argument(
@@ -756,6 +832,18 @@ behavior (cwd-relative outputs under redacted/):
         '--dry-run',
         action='store_true',
         help='Show matches only; do not write redacted files or dictionary',
+    )
+    parser.add_argument(
+        '-q',
+        '--quiet',
+        action='store_true',
+        help='Minimal stdout (summary line only); errors still go to stderr',
+    )
+    parser.add_argument(
+        '-v',
+        '--verbose',
+        action='store_true',
+        help='Extra detail (e.g. match counts and values when redacting)',
     )
     parser.add_argument(
         '-e',
@@ -941,6 +1029,8 @@ def main(argv=None):
 
     # File redaction: parse flags manually so paths are not confused with subcommands.
     dry_run = False
+    quiet = False
+    verbose = False
     files = []
     cli_excludes = []
     cli_includes = []
@@ -949,6 +1039,12 @@ def main(argv=None):
         arg = argv[i]
         if arg in ('-n', '--dry-run'):
             dry_run = True
+            i += 1
+        elif arg in ('-q', '--quiet'):
+            quiet = True
+            i += 1
+        elif arg in ('-v', '--verbose'):
+            verbose = True
             i += 1
         elif arg in ('-e', '--exclude'):
             if i + 1 >= len(argv):
@@ -982,6 +1078,10 @@ def main(argv=None):
             files.append(arg)
             i += 1
 
+    if quiet and verbose:
+        print("Cannot combine --quiet and --verbose.", file=sys.stderr)
+        sys.exit(2)
+
     if not files:
         parser.print_help()
         sys.exit(1)
@@ -990,6 +1090,8 @@ def main(argv=None):
         dry_run=dry_run,
         extra_excludes=cli_excludes,
         includes=cli_includes,
+        quiet=quiet,
+        verbose=verbose,
     )
 
 

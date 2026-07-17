@@ -54,6 +54,7 @@ Default git branch: **`master`** (not `main`).
 | **Includes** | Optional `-i` / `--include GLOB` (repeatable); if any set, only matching paths are kept |
 | **Binary skip (always)** | Known binary/image/audio/archive extensions; NUL-byte samples; non-UTF-8 decode |
 | **Dry-run** | `-n` / `--dry-run`: print matches only; no redacted files, no dictionary write |
+| **Output** | Default per-file messages + final `Summary: …`. `-q` / `--quiet`: summary only on stdout. `-v` / `--verbose`: extra match detail. Errors always on stderr |
 | **Errors** | Log to **stderr**, continue other files; exit **1** if any failed; dictionary still saved for successes |
 | **`.gitignore`** | On write under `redacted/`, ensure `redacted/` is listed in `.gitignore` |
 
@@ -62,6 +63,8 @@ redact config.env
 redact file1.txt file2.env src/
 redact --dry-run src/
 redact -n config.env
+redact -q src/                             # quiet (CI-friendly summary)
+redact -v config.env                      # verbose match detail
 redact --exclude 'vendor/**' --exclude '*.log' src/
 redact --include '**/*.env' --include '**/*.yml' .
 ```

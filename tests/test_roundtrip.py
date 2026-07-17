@@ -53,19 +53,19 @@ def test_redact_unredact_roundtrip(workdir):
 
 def test_redact_unredact_multi_and_dir_subprocess(workdir):
     Path("cfg").mkdir()
-    Path("cfg/one.env").write_text("API_KEY=k-one\n", encoding="utf-8")
-    Path("cfg/two.env").write_text("API_KEY=k-one\nTOKEN=t-two\n", encoding="utf-8")
+    Path("cfg/one.env").write_text("API_KEY=k-one-long\n", encoding="utf-8")
+    Path("cfg/two.env").write_text("API_KEY=k-one-long\nTOKEN=t-two-ok\n", encoding="utf-8")
     Path("root.txt").write_text("see 172.16.0.1\n", encoding="utf-8")
 
     r = _run("redactor.redact", "cfg", "root.txt", cwd=workdir)
     assert r.returncode == 0, r.stderr + r.stdout
-    assert "k-one" not in Path("redacted/cfg/one.env").read_text(encoding="utf-8")
-    assert "t-two" not in Path("redacted/cfg/two.env").read_text(encoding="utf-8")
+    assert "k-one-long" not in Path("redacted/cfg/one.env").read_text(encoding="utf-8")
+    assert "t-two-ok" not in Path("redacted/cfg/two.env").read_text(encoding="utf-8")
     assert "172.16.0.1" not in Path("redacted/root.txt").read_text(encoding="utf-8")
 
     # Same API key shares placeholder across files
     d = Path("redacted/dictionary.yaml").read_text(encoding="utf-8")
-    assert "k-one" in d
+    assert "k-one-long" in d
 
     Path("cfg/one.env").write_text("x\n", encoding="utf-8")
     Path("cfg/two.env").write_text("y\n", encoding="utf-8")
@@ -73,6 +73,6 @@ def test_redact_unredact_multi_and_dir_subprocess(workdir):
 
     u = _run("redactor.unredact", "cfg", "root.txt", cwd=workdir)
     assert u.returncode == 0, u.stderr + u.stdout
-    assert "k-one" in Path("cfg/one.env").read_text(encoding="utf-8")
-    assert "t-two" in Path("cfg/two.env").read_text(encoding="utf-8")
+    assert "k-one-long" in Path("cfg/one.env").read_text(encoding="utf-8")
+    assert "t-two-ok" in Path("cfg/two.env").read_text(encoding="utf-8")
     assert "172.16.0.1" in Path("root.txt").read_text(encoding="utf-8")

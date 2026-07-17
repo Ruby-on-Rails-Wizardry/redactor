@@ -84,11 +84,11 @@ Built-in defaults (also what `patterns init` writes):
 
 | Name | Matches (summary) |
 |------|-------------------|
-| `IP` | IPv4-like `a.b.c.d` |
+| `IP` | Valid IPv4 (each octet 0–255), not arbitrary dotted numbers |
 | `EMAIL` | email addresses |
-| `APIKEY` | value after `API_KEY=` |
-| `TOKEN` | value after `TOKEN=` |
-| `PASSWORD` | non-space value after `PASSWORD=` |
+| `APIKEY` | value after `API_KEY=` (≥8 `[A-Za-z0-9-_]` chars) |
+| `TOKEN` | value after `TOKEN=` (≥6 `[A-Za-z0-9-_]` chars) |
+| `PASSWORD` | after `PASSWORD=`: quoted string, or unquoted ≥4 non-space chars |
 | `GOV` | hostnames ending in `.gov` |
 
 ### Exclude CLI

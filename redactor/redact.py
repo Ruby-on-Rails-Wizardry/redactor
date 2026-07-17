@@ -542,6 +542,10 @@ class OutputMode:
         if self.verbose and not self.quiet:
             print(msg)
 
+    def summary(self, msg):
+        """Always print (including --quiet) so CI gets a one-line result."""
+        print(msg)
+
     def error(self, msg):
         print(msg, file=sys.stderr)
 
@@ -709,7 +713,7 @@ def redact_files(
     paths = remaining
 
     if not paths:
-        out.info(stats.summary_line(dry_run=dry_run))
+        out.summary(stats.summary_line(dry_run=dry_run))
         if stats.errors:
             out.error(f"Completed with {stats.errors} error(s).")
             sys.exit(1)
@@ -754,7 +758,7 @@ def redact_files(
 
     if dry_run:
         out.info("Dry run complete; no files or dictionary written.")
-        out.info(stats.summary_line(dry_run=True))
+        out.summary(stats.summary_line(dry_run=True))
         if stats.errors:
             out.error(f"Completed with {stats.errors} error(s).")
             sys.exit(1)
@@ -764,7 +768,7 @@ def redact_files(
         save_dictionary(dictionary)
         out.info(f"Placeholder dictionary updated at: {DICT_PATH}")
 
-    out.info(stats.summary_line(dry_run=False))
+    out.summary(stats.summary_line(dry_run=False))
     if stats.errors:
         out.error(f"Completed with {stats.errors} error(s).")
         sys.exit(1)

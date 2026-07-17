@@ -94,8 +94,9 @@ def test_patterns_add_updates_existing(redact_mod, workdir, monkeypatch, capsys)
     assert "Updated" in capsys.readouterr().out
     data = yaml.safe_load(Path("redacted/patterns.yaml").read_text(encoding="utf-8"))
     assert data["IP"] == r"\b\d+\.\d+\.\d+\.\d+\b"
-    # Order preserved: IP still first among defaults
-    assert list(data.keys())[0] == "IP"
+    # Update preserves relative order of existing keys
+    assert "IP" in data
+    assert list(data.keys()).index("IP") < list(data.keys()).index("GOV")
 
 
 def test_patterns_add_rejects_bad_regex(redact_mod, workdir, monkeypatch, capsys):

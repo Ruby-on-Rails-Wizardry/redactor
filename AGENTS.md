@@ -29,10 +29,18 @@ tests/
 ### Patterns (`redacted/patterns.yaml`)
 
 - CLI: `redact patterns init|list|add|remove`
-- Missing file → `DEFAULT_PATTERNS` (IP, EMAIL, APIKEY, TOKEN, PASSWORD, GOV)
+- Missing file → `DEFAULT_PATTERNS` (PEM, JWT, AWSKEY, BEARER, EMAIL, APIKEY, TOKEN, PASSWORD, IP, IP6, GOV)
 - Present → that file only; validate with `re.compile`
-- Order = application order; EMAIL before GOV
+- Order = application order; shape patterns first; EMAIL before GOV
+- Assignment patterns use capturing groups for values; engine uses `extract_match_values`
 - `patterns add` without file seeds defaults then sets name
+
+### Allowlist (`redacted/allowlist.yaml`)
+
+- CLI: `redact allowlist init|list|add|remove`
+- Missing file → `DEFAULT_ALLOWLIST` (localhost / doc IPs)
+- Present → that file only
+- Exact string match; filtered in `collect_matches` / `_redact_content`
 
 ### Excludes (`redacted/exclude.yaml`)
 

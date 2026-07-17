@@ -13,18 +13,73 @@ from redactor.paths import expand_paths, filter_excluded, filter_included
 
 # Built-in defaults used when redacted/patterns.yaml is missing.
 # Order matters: patterns are applied top-to-bottom.
+# Capturing groups may mark the secret value; the engine uses the first non-empty group
+# (or the full match if there are no groups). See extract_match_values().
+
 # Valid IPv4 octets (0–255), not merely "digits with dots".
 _IPV4_OCTET = r'(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)'
+# Flexible assignment: KEY = value / KEY: value with optional quotes.
+# Unquoted minimum length varies by pattern (see each use).
+def _assign_value(min_len: int) -> str:
+    return (
+        r'(?:"([^"\n]+)"|\'([^\'\n]+)\'|'
+        rf'([^\s#\'",;]{{{min_len},}}))'
+    )
+
 
 DEFAULT_PATTERNS = {
-    'IP': rf'\b(?:{_IPV4_OCTET}\.){{3}}{_IPV4_OCTET}\b',
+    # Shape-based (no env key required) — run early for dense secret material.
+    'PEM': (
+        r'-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----'
+        r'[\s\S]*?'
+        r'-----END (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----'
+    ),
+    'JWT': (
+        r'\b(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b'
+    ),
+    'AWSKEY': r'\b(AKIA[0-9A-Z]{16})\b',
+    'BEARER': r'(?i)\bBearer\s+([A-Za-z0-9._\-+=/]{8,})',
+    # Assignment-style credentials (broader key names + =/:)
     'EMAIL': r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b',
-    'APIKEY': r'(?<=API_KEY=)[A-Za-z0-9-_]{8,}',
-    'TOKEN': r'(?<=TOKEN=)[A-Za-z0-9-_]{6,}',
-    # Password: quoted string, or unquoted run of non-space at least 4 chars
-    # (avoids one-off tokens like PASSWORD=has from prose).
-    'PASSWORD': r'(?<=PASSWORD=)(?:"[^"\n]+"|\'[^\'\n]+\'|\S{4,})',
+    'APIKEY': (
+        rf'(?i)\b(?:API[_-]?KEY|apiKey)\s*[=:]\s*{_assign_value(8)}'
+    ),
+    'TOKEN': (
+        rf'(?i)\b(?:TOKEN|ACCESS_TOKEN|AUTH_TOKEN|API_TOKEN)\s*[=:]\s*{_assign_value(6)}'
+    ),
+    'PASSWORD': (
+        rf'(?i)\b(?:PASSWORD|PASSWD|DB_PASSWORD|MYSQL_PWD)\s*[=:]\s*{_assign_value(4)}'
+    ),
+    'IP': rf'\b(?:{_IPV4_OCTET}\.){{3}}{_IPV4_OCTET}\b',
+    # Practical IPv6 forms (full, compressed, loopback).
+    # Use hex/colon lookarounds: \b fails before ':' (both non-word chars).
+    'IP6': (
+        r'(?i)(?<![0-9a-f:])(?:'
+        r'(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}'
+        r'|(?:[0-9a-f]{1,4}:){1,7}:'
+        r'|:(?::[0-9a-f]{1,4}){1,7}'
+        r'|(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}'
+        r'|(?:[0-9a-f]{1,4}:){1,5}(?::[0-9a-f]{1,4}){1,2}'
+        r'|(?:[0-9a-f]{1,4}:){1,4}(?::[0-9a-f]{1,4}){1,3}'
+        r'|(?:[0-9a-f]{1,4}:){1,3}(?::[0-9a-f]{1,4}){1,4}'
+        r'|(?:[0-9a-f]{1,4}:){1,2}(?::[0-9a-f]{1,4}){1,5}'
+        r'|[0-9a-f]{1,4}:(?:(?::[0-9a-f]{1,4}){1,6})'
+        r'|::(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4}'
+        r'|::1'
+        r')(?![0-9a-f:])'
+    ),
     'GOV': r'\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+gov\b',
+}
+
+# Safe values never redacted when using built-in allowlist (or after allowlist init).
+DEFAULT_ALLOWLIST = {
+    'LOCALHOST_V4': '127.0.0.1',
+    'UNSPECIFIED_V4': '0.0.0.0',
+    'BROADCAST_V4': '255.255.255.255',
+    'LOCALHOST_V6': '::1',
+    'DOC_TEST_NET_1': '192.0.2.1',
+    'DOC_TEST_NET_2': '198.51.100.1',
+    'DOC_TEST_NET_3': '203.0.113.1',
 }
 
 # Extensions always treated as binary/image (skipped even without exclude.yaml).
@@ -148,6 +203,7 @@ patterns = DEFAULT_PATTERNS
 DICT_PATH = Path('redacted/dictionary.yaml')
 PATTERNS_PATH = Path('redacted/patterns.yaml')
 EXCLUDE_PATH = Path('redacted/exclude.yaml')
+ALLOWLIST_PATH = Path('redacted/allowlist.yaml')
 GITIGNORE_PATH = Path('.gitignore')
 REDACTED_GITIGNORE_ENTRY = 'redacted/'
 
@@ -504,16 +560,175 @@ def cmd_exclude_remove(args):
     print(f"Removed exclude {name!r} from {EXCLUDE_PATH}")
 
 
-def collect_matches(content, active_patterns):
+def validate_allowlist(data):
+    """Return validated ordered dict of name -> exact string, or raise ValueError."""
+    if not isinstance(data, dict):
+        raise ValueError("allowlist config must be a mapping of NAME: string")
+    if not data:
+        raise ValueError("allowlist config is empty")
+
+    validated = {}
+    for name, value in data.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"invalid allowlist name: {name!r}")
+        if not isinstance(value, str) or value == '':
+            raise ValueError(f"allowlist {name!r} must be a non-empty string")
+        validated[name.strip()] = value
+    return validated
+
+
+def load_allowlist_file():
+    with open(ALLOWLIST_PATH, 'r', encoding='utf-8') as f:
+        data = yaml.safe_load(f)
+    if data is None or data == {}:
+        return {}
+    return validate_allowlist(data)
+
+
+def save_allowlist(allowlist_map):
+    validated = validate_allowlist(allowlist_map)
+    ensure_redacted_workspace()
+    with open(ALLOWLIST_PATH, 'w', encoding='utf-8') as f:
+        yaml.safe_dump(validated, f, default_flow_style=False, sort_keys=False)
+    return validated
+
+
+def load_allowlist():
+    """Effective allowlist map: file if present, otherwise built-in defaults."""
+    if ALLOWLIST_PATH.exists():
+        try:
+            return load_allowlist_file()
+        except ValueError as exc:
+            print(f"Invalid allowlist config ({ALLOWLIST_PATH}): {exc}", file=sys.stderr)
+            sys.exit(1)
+    return dict(DEFAULT_ALLOWLIST)
+
+
+def allowlist_values(allowlist_map=None):
+    """Set of exact strings that must never be redacted."""
+    if allowlist_map is None:
+        allowlist_map = load_allowlist()
+    return set(allowlist_map.values())
+
+
+def cmd_allowlist_init(args):
+    if ALLOWLIST_PATH.exists() and not args.force:
+        print(f"Allowlist file already exists: {ALLOWLIST_PATH}", file=sys.stderr)
+        print("Use --force to overwrite with built-in defaults.", file=sys.stderr)
+        sys.exit(1)
+    save_allowlist(DEFAULT_ALLOWLIST)
+    print(f"Wrote built-in allowlist to: {ALLOWLIST_PATH}")
+
+
+def cmd_allowlist_list(args):
+    if ALLOWLIST_PATH.exists():
+        allow_map = load_allowlist_file()
+        source = str(ALLOWLIST_PATH)
+    else:
+        allow_map = dict(DEFAULT_ALLOWLIST)
+        source = "built-in defaults (run: redact allowlist init)"
+
+    if args.yaml:
+        yaml.safe_dump(allow_map, sys.stdout, default_flow_style=False, sort_keys=False)
+        return
+
+    print(f"Source: {source}")
+    if not allow_map:
+        print("(no allowlist entries)")
+        return
+    width = max(len(name) for name in allow_map)
+    for name, value in allow_map.items():
+        print(f"{name.ljust(width)}  {value}")
+
+
+def cmd_allowlist_add(args):
+    name = args.name.strip()
+    if not name:
+        print("Allowlist name must be non-empty.", file=sys.stderr)
+        sys.exit(1)
+    value = args.value
+    if value == '':
+        print("Allowlist value must be non-empty.", file=sys.stderr)
+        sys.exit(1)
+
+    if ALLOWLIST_PATH.exists():
+        allow_map = load_allowlist_file()
+    else:
+        allow_map = dict(DEFAULT_ALLOWLIST)
+
+    created = name not in allow_map
+    allow_map[name] = value
+    save_allowlist(allow_map)
+    action = "Added" if created else "Updated"
+    print(f"{action} allowlist {name!r} in {ALLOWLIST_PATH}")
+
+
+def cmd_allowlist_remove(args):
+    name = args.name.strip()
+    if not ALLOWLIST_PATH.exists():
+        print(f"Allowlist file not found: {ALLOWLIST_PATH}", file=sys.stderr)
+        print("Run: redact allowlist init", file=sys.stderr)
+        sys.exit(1)
+
+    allow_map = load_allowlist_file()
+    if name not in allow_map:
+        if args.ignore_missing:
+            print(f"Allowlist entry {name!r} not present; nothing to do.")
+            return
+        print(f"Allowlist entry not found: {name!r}", file=sys.stderr)
+        sys.exit(1)
+
+    del allow_map[name]
+    if not allow_map:
+        print("Warning: allowlist is empty.", file=sys.stderr)
+        ensure_redacted_workspace()
+        with open(ALLOWLIST_PATH, 'w', encoding='utf-8') as f:
+            yaml.safe_dump({}, f, default_flow_style=False, sort_keys=False)
+    else:
+        save_allowlist(allow_map)
+    print(f"Removed allowlist {name!r} from {ALLOWLIST_PATH}")
+
+
+def extract_match_values(pattern, content):
+    """Yield secret strings from pattern matches in content.
+
+    If the pattern has capturing groups, the first non-empty group is used
+    (so assignment patterns can capture only the value). Otherwise the full
+    match is used (PEM blocks, plain IPs, etc.).
+    """
+    try:
+        compiled = re.compile(pattern)
+    except re.error:
+        compiled = re.compile(pattern, re.MULTILINE)
+    for m in compiled.finditer(content):
+        if m.lastindex:
+            value = None
+            for i in range(1, m.lastindex + 1):
+                g = m.group(i)
+                if g:
+                    value = g
+                    break
+            if value is None:
+                value = m.group(0)
+        else:
+            value = m.group(0)
+        if value:
+            yield value
+
+
+def collect_matches(content, active_patterns, allowlist=None):
     """Return list of (pattern_name, matched_text) without mutating content."""
+    denied = set(allowlist or ())
     found = []
     for key, pattern in active_patterns.items():
-        for match in sorted(set(re.findall(pattern, content))):
+        for match in sorted(set(extract_match_values(pattern, content))):
+            if match in denied:
+                continue
             found.append((key, match))
     return found
 
 
-def classify_matches(content, active_patterns, reverse_dict):
+def classify_matches(content, active_patterns, reverse_dict, allowlist=None):
     """Split matches into new secrets vs already-mapped (reused) dictionary values.
 
     Returns (new_matches, reused_matches) where each item is
@@ -522,7 +737,7 @@ def classify_matches(content, active_patterns, reverse_dict):
     """
     new_matches = []
     reused_matches = []
-    for key, match in collect_matches(content, active_patterns):
+    for key, match in collect_matches(content, active_patterns, allowlist=allowlist):
         if match in reverse_dict:
             reused_matches.append((key, match, reverse_dict[match]))
         else:
@@ -610,10 +825,13 @@ def read_text_file(path: Path) -> str:
         return infile.read()
 
 
-def _redact_content(content, active_patterns, dictionary, reverse_dict):
+def _redact_content(content, active_patterns, dictionary, reverse_dict, allowlist=None):
     """Apply patterns to content, updating dictionary/reverse_dict in place."""
+    denied = set(allowlist or ())
     for key, pattern in active_patterns.items():
-        for match in set(re.findall(pattern, content)):
+        for match in set(extract_match_values(pattern, content)):
+            if match in denied:
+                continue
             if match in reverse_dict:
                 placeholder = reverse_dict[match]
             else:
@@ -631,6 +849,7 @@ def redact_file(
     reverse_dict=None,
     dry_run=False,
     new_only=False,
+    allowlist=None,
     out=None,
     stats=None,
 ):
@@ -659,6 +878,8 @@ def redact_file(
         dictionary = load_dictionary()
     if reverse_dict is None:
         reverse_dict = {v: k for k, v in dictionary.items()}
+    if allowlist is None:
+        allowlist = allowlist_values()
 
     if is_binary_extension(input_path):
         out.error(f"Skipping binary file: {input_path}")
@@ -672,7 +893,7 @@ def redact_file(
 
     content = read_text_file(input_path)
     new_matches, reused_matches = classify_matches(
-        content, active_patterns, reverse_dict
+        content, active_patterns, reverse_dict, allowlist=allowlist
     )
     stats.new_secrets += len(new_matches)
     stats.reused_secrets += len(reused_matches)
@@ -710,7 +931,9 @@ def redact_file(
         out.detail(f"  reused={len(reused_matches)}")
         return dictionary, reverse_dict, "skipped"
 
-    content = _redact_content(content, active_patterns, dictionary, reverse_dict)
+    content = _redact_content(
+        content, active_patterns, dictionary, reverse_dict, allowlist=allowlist
+    )
 
     redacted_path = ensure_redacted_path(input_path)
     with open(redacted_path, 'w', encoding='utf-8') as outfile:
@@ -804,6 +1027,7 @@ def redact_files(
 
     dictionary = load_dictionary()
     reverse_dict = {v: k for k, v in dictionary.items()}
+    allowlist = allowlist_values()
     wrote_any = False
 
     for input_path in paths:
@@ -815,6 +1039,7 @@ def redact_files(
                 reverse_dict=reverse_dict,
                 dry_run=dry_run,
                 new_only=new_only,
+                allowlist=allowlist,
                 out=out,
                 stats=stats,
             )
@@ -888,11 +1113,13 @@ examples:
   redact patterns init              write built-in patterns to {PATTERNS_PATH}
   redact patterns add GOV '\\b...gov\\b'
   redact exclude init               write starter path globs to {EXCLUDE_PATH}
-  redact exclude add VENDOR 'vendor/**'
+  redact allowlist init             write safe defaults (127.0.0.1, doc IPs, …)
   redact help patterns              help for the patterns command
 
 behavior (cwd-relative outputs under redacted/):
-  patterns   {PATTERNS_PATH} if present, else built-ins (IP, EMAIL, APIKEY, …)
+  patterns   {PATTERNS_PATH} if present, else built-ins (PEM, JWT, AWSKEY,
+             BEARER, EMAIL, APIKEY, TOKEN, PASSWORD, IP, IP6, GOV)
+  allowlist  {ALLOWLIST_PATH} if present, else built-in safe strings
   excludes   {EXCLUDE_PATH} globs plus optional --exclude (repeatable)
   includes   optional --include (repeatable); if set, keep only matching paths
   always     skip .git/ and other VCS/venv/cache dirs; skip binary/image
@@ -1068,6 +1295,59 @@ behavior (cwd-relative outputs under redacted/):
     )
     e_remove.set_defaults(func=cmd_exclude_remove)
 
+    allow_parser = sub.add_parser(
+        'allowlist',
+        help='List, add, remove, or initialize never-redact string allowlist',
+        description=(
+            f'Manage {ALLOWLIST_PATH} (name → exact string). Matching values are '
+            f'never redacted. If the file is missing, built-in defaults apply '
+            f'(localhost and RFC 5737 documentation IPs).'
+        ),
+    )
+    allow_sub = allow_parser.add_subparsers(dest='allowlist_command', required=True)
+
+    a_init = allow_sub.add_parser(
+        'init',
+        help=f'Write built-in allowlist to {ALLOWLIST_PATH}',
+    )
+    a_init.add_argument(
+        '--force',
+        action='store_true',
+        help='Overwrite an existing allowlist file',
+    )
+    a_init.set_defaults(func=cmd_allowlist_init)
+
+    a_list = allow_sub.add_parser(
+        'list',
+        help='Show effective allowlist (file if present, else built-ins)',
+    )
+    a_list.add_argument(
+        '--yaml',
+        action='store_true',
+        help='Print allowlist as YAML',
+    )
+    a_list.set_defaults(func=cmd_allowlist_list)
+
+    a_add = allow_sub.add_parser(
+        'add',
+        help='Add or update an allowlist string (seeds defaults if file missing)',
+    )
+    a_add.add_argument('name', help='Entry name (e.g. LOCALHOST_V4)')
+    a_add.add_argument('value', help='Exact string that must never be redacted')
+    a_add.set_defaults(func=cmd_allowlist_add)
+
+    a_remove = allow_sub.add_parser(
+        'remove',
+        help='Remove an allowlist entry from the config file',
+    )
+    a_remove.add_argument('name', help='Entry name to remove')
+    a_remove.add_argument(
+        '--ignore-missing',
+        action='store_true',
+        help='Do not error if the entry is not defined',
+    )
+    a_remove.set_defaults(func=cmd_allowlist_remove)
+
     parser.add_argument(
         'files',
         nargs='*',
@@ -1108,7 +1388,7 @@ def main(argv=None):
         return
 
     # Config management subcommands (must not treat file paths as subcommands)
-    if head in ('patterns', 'exclude'):
+    if head in ('patterns', 'exclude', 'allowlist'):
         args = parser.parse_args(argv)
         try:
             args.func(args)

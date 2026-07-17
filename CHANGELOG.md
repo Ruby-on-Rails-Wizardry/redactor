@@ -7,13 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Development toward **0.2.0** (package version already bumped). Focus: more robust built-in patterns.
-
 ### Added
+
+- Robust assignment matchers for `APIKEY` / `TOKEN` / `PASSWORD` (`=` or `:`, optional spaces, quotes, alternate key names)
+- Shape-based patterns: `PEM`, `JWT`, `AWSKEY`, `BEARER`
+- IPv6 pattern `IP6` (compressed forms and `::1`)
+- Allowlist CLI (`redact allowlist …`) and `redacted/allowlist.yaml` for never-redact strings
+- Built-in allowlist defaults (localhost, RFC 5737 documentation IPs)
+- Match engine `extract_match_values` for capturing-group patterns
 
 ### Changed
 
 - Version bump to 0.2.0 (in progress)
+- Default pattern set order: shape secrets first, then credentials, then IPs, then GOV
 
 ### Fixed
 
@@ -53,3 +59,4 @@ Initial public release of the `redact` / `unredact` CLI package.
 
 [Unreleased]: https://github.com/Ruby-on-Rails-Wizardry/redactor/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/Ruby-on-Rails-Wizardry/redactor/releases/tag/v0.1.0
+<!-- When releasing 0.2.0: move Unreleased notes into ## [0.2.0] - YYYY-MM-DD and add compare links. -->

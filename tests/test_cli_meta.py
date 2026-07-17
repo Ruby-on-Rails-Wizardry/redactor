@@ -29,6 +29,7 @@ def test_help_command(redact_mod, monkeypatch, capsys):
     assert "usage: redact" in out
     assert "patterns" in out
     assert "exclude" in out
+    assert "allowlist" in out
     assert "version" in out
     assert "dry-run" in out or "-n" in out
     assert "directories" in out.lower() or "directory" in out.lower()

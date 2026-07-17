@@ -61,8 +61,9 @@ Same checks as local `mise run test`, plus a quick CLI smoke step.
 |------|------|
 | **Inputs** | One or more files and/or directories |
 | **Output** | `redacted/<path>` (layout preserved) + update `redacted/dictionary.yaml` |
-| **Patterns** | `redacted/patterns.yaml` if present; else built-ins: `IP`, `EMAIL`, `APIKEY`, `TOKEN`, `PASSWORD`, `GOV` (order fixed; EMAIL before GOV) |
-| **Placeholders** | `{NAME}_{8 hex chars}`; same secret → same placeholder for the whole batch |
+| **Patterns** | `redacted/patterns.yaml` if present; else built-ins (order fixed): `PEM`, `JWT`, `AWSKEY`, `BEARER`, `EMAIL`, `APIKEY`, `TOKEN`, `PASSWORD`, `IP`, `IP6`, `GOV` |
+| **Allowlist** | Exact strings never redacted: `redacted/allowlist.yaml` if present; else built-ins (localhost, `0.0.0.0`, RFC 5737 doc IPs, `::1`) |
+| **Placeholders** | `{NAME}_{8 hex chars}`; same secret → same placeholder for the whole batch; collision-safe generation |
 | **Dir skips (always)** | Never walk/process path components: `.git`, `.hg`, `.svn`, `.venv`, `venv`, `__pycache__`, `.pytest_cache`, `node_modules`, `.tox`, `.mypy_cache`, `.ruff_cache`, `.eggs`, `dist`, `build`. Also prune source trees named `redacted/` (tool workspace). Explicit `redact .git` yields no files |
 | **Path excludes** | Optional `redacted/exclude.yaml` (name → glob) plus CLI `-e` / `--exclude GLOB` (repeatable) |
 | **Includes** | Optional `-i` / `--include GLOB` (repeatable); if any set, only matching paths are kept |
@@ -101,12 +102,28 @@ Built-in defaults (also what `patterns init` writes):
 
 | Name | Matches (summary) |
 |------|-------------------|
-| `IP` | Valid IPv4 (each octet 0–255), not arbitrary dotted numbers |
+| `PEM` | `BEGIN … PRIVATE KEY` blocks (RSA/EC/OPENSSH/…) |
+| `JWT` | three-segment `eyJ…` tokens |
+| `AWSKEY` | AWS access key IDs (`AKIA` + 16 chars) |
+| `BEARER` | `Bearer <token>` (HTTP auth) |
 | `EMAIL` | email addresses |
-| `APIKEY` | value after `API_KEY=` (≥8 `[A-Za-z0-9-_]` chars) |
-| `TOKEN` | value after `TOKEN=` (≥6 `[A-Za-z0-9-_]` chars) |
-| `PASSWORD` | after `PASSWORD=`: quoted string, or unquoted ≥4 non-space chars |
+| `APIKEY` | `API_KEY` / `api_key` / `apiKey` with `=` or `:`, quoted or unquoted (≥8) |
+| `TOKEN` | `TOKEN` / `ACCESS_TOKEN` / … with `=` or `:`, quoted or unquoted (≥6) |
+| `PASSWORD` | `PASSWORD` / `PASSWD` / `DB_PASSWORD` / … with `=` or `:`, quoted or unquoted (≥4) |
+| `IP` | Valid IPv4 (each octet 0–255) |
+| `IP6` | Common IPv6 forms including compressed and `::1` |
 | `GOV` | hostnames ending in `.gov` |
+
+### Allowlist CLI
+
+Exact strings that must **never** be redacted. File: `redacted/allowlist.yaml` (`NAME: string`).
+
+```bash
+redact allowlist init | init --force
+redact allowlist list | list --yaml
+redact allowlist add NAME 'exact-string'   # seeds built-ins if file missing
+redact allowlist remove NAME [--ignore-missing]
+```
 
 ### Exclude CLI
 
@@ -170,6 +187,7 @@ AGENTS.md
 redacted/
   patterns.yaml           # optional
   exclude.yaml            # optional
+  allowlist.yaml          # optional never-redact strings
   dictionary.yaml         # sensitive
   …                       # mirrored redacted files
 ```

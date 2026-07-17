@@ -205,7 +205,7 @@ def test_email_takes_precedence_over_gov_in_addresses(redact_mod, workdir, monke
 
 
 def test_cli_subprocess_redact(workdir):
-    Path("cli.txt").write_text("ip=127.0.0.1\n", encoding="utf-8")
+    Path("cli.txt").write_text("ip=8.8.8.8\n", encoding="utf-8")
     result = subprocess.run(
         [sys.executable, "-m", "redactor.redact", "cli.txt"],
         cwd=workdir,
@@ -214,7 +214,7 @@ def test_cli_subprocess_redact(workdir):
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert "127.0.0.1" not in Path("redacted/cli.txt").read_text(encoding="utf-8")
+    assert "8.8.8.8" not in Path("redacted/cli.txt").read_text(encoding="utf-8")
 
 
 def test_main_redacts_multiple_files(redact_mod, workdir, monkeypatch, capsys):

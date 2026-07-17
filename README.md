@@ -48,6 +48,8 @@ See [CHANGELOG.md](CHANGELOG.md) for release history (Keep a Changelog).
 See **[docs/RELEASE.md](docs/RELEASE.md)** for the full checklist  
 (`test → changelog → version → docs → commit → tag → push → **GitHub Release** → CI`).
 
+Agent/human shortcuts: **send it**, **ship it**, or **cut a release** mean run that process end-to-end.
+
 ### CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on push and pull requests to `master`:

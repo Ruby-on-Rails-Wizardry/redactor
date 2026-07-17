@@ -4,6 +4,20 @@ How to cut a version of **redactor**. Default branch is **`master`**.
 
 A release is **not done** until the GitHub Release exists for the tag.
 
+## Agent / human trigger phrases
+
+When the user says any of the following, run this process **end-to-end** (do not stop after commit or push alone):
+
+| Phrase | Action |
+|--------|--------|
+| **send it** | Full release checklist below |
+| **ship it** | Same |
+| **cut a release** | Same |
+
+```text
+test → changelog → version → docs → commit → tag → push master + tag → gh release create → CI green
+```
+
 ## Preconditions
 
 - [ ] Working tree clean (`git status`)
@@ -155,3 +169,5 @@ gh release view vX.Y.Z --repo Ruby-on-Rails-Wizardry/redactor
 ```text
 test → changelog → version → docs → commit → tag → push master + tag → gh release create → CI green
 ```
+
+(Also the definition of **send it** / **ship it** / **cut a release**.)

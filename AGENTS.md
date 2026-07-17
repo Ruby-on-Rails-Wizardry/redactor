@@ -85,6 +85,12 @@ When shipping user-visible changes, update [CHANGELOG.md](CHANGELOG.md) under `[
 
 **Releases:** follow [docs/RELEASE.md](docs/RELEASE.md) — test → changelog → version → docs → commit → tag → push `master` + tag → **`gh release create` (required)** → verify CI.
 
+### Phrase shortcuts
+
+| Phrase | Means |
+|--------|--------|
+| **send it** / **ship it** / **cut a release** | Follow [docs/RELEASE.md](docs/RELEASE.md) **end-to-end**: test → changelog → version → docs → commit → annotated tag → push `master` + tag → **`gh release create` (required)** → verify CI / `gh release view`. Do **not** stop after push alone. |
+
 ## Security
 
 - Never commit `dictionary.yaml` or real secrets

@@ -39,6 +39,16 @@ unredact path/to/file
 
 Default git branch: **`master`** (not `main`).
 
+### CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on push and pull requests to `master`:
+
+1. Install package + dev deps (`pip install -e ".[dev]"`)
+2. `pytest` with coverage (fails under 90%)
+3. Smoke-check `redact version` and `unredact -h`
+
+Same checks as local `mise run test`, plus a quick CLI smoke step.
+
 ## Behavior specification
 
 ### Redact

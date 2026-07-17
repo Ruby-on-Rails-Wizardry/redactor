@@ -116,11 +116,9 @@ def test_redact_file_standalone_owns_dictionary(redact_mod, workdir, capsys):
     assert "8.8.8.8" not in Path("redacted/solo.txt").read_text(encoding="utf-8")
 
 
-def test_redact_file_missing_exits(redact_mod, workdir, capsys):
-    with pytest.raises(SystemExit) as exc:
+def test_redact_file_missing_raises(redact_mod, workdir):
+    with pytest.raises(FileNotFoundError, match="File not found"):
         redact_mod.redact_file(Path("gone.txt"))
-    assert exc.value.code == 1
-    assert "File not found" in capsys.readouterr().err
 
 
 def test_redact_with_empty_patterns_warns(redact_mod, workdir, monkeypatch, capsys):
@@ -167,13 +165,11 @@ def test_redact_unknown_flag_exits(redact_mod, workdir, monkeypatch):
 # --- unredact edge cases ---
 
 
-def test_unredact_missing_redacted_no_paste(unredact_mod, workdir, capsys):
+def test_unredact_missing_redacted_no_paste(unredact_mod, workdir):
     Path("redacted").mkdir()
     Path("redacted/dictionary.yaml").write_text("IP_x: '1.1.1.1'\n", encoding="utf-8")
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(FileNotFoundError, match="Redacted file not found"):
         unredact_mod.unredact_file(Path("missing.txt"), allow_paste=False)
-    assert exc.value.code == 1
-    assert "Redacted file not found" in capsys.readouterr().err
 
 
 def test_unredact_file_loads_dictionary_when_not_passed(unredact_mod, workdir):
@@ -222,6 +218,7 @@ def test_unredact_help_flag(unredact_mod, workdir, monkeypatch, capsys):
     assert "Usage:" in out
     assert "Examples:" in out
     assert "redacted/" in out
+    assert ".git" in out
 
 
 def test_unredact_from_redacted_file_only(unredact_mod, workdir, monkeypatch):

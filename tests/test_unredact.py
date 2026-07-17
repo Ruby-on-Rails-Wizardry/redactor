@@ -60,6 +60,8 @@ def test_main_requires_argument(unredact_mod, workdir, monkeypatch, capsys):
     assert "Usage:" in out
     assert "directory" in out.lower() or "directories" in out.lower()
     assert "dictionary.yaml" in out
+    assert ".git" in out
+    assert "stderr" in out or "non-zero" in out or "failed" in out
 
 
 def test_main_restores_file(unredact_mod, workdir, monkeypatch, capsys):

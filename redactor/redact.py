@@ -9,9 +9,7 @@ import yaml
 from pathlib import Path
 
 from redactor import __version__
-from redactor.paths import expand_paths
-
-
+from redactor.paths import expand_paths, filter_excluded
 
 # Built-in defaults used when redacted/patterns.yaml is missing.
 # Order matters: patterns are applied top-to-bottom.
@@ -24,11 +22,127 @@ DEFAULT_PATTERNS = {
     'GOV': r'\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+gov\b',
 }
 
+# Extensions always treated as binary/image (skipped even without exclude.yaml).
+BINARY_EXTENSIONS = frozenset(
+    {
+        # images
+        '.png',
+        '.jpg',
+        '.jpeg',
+        '.gif',
+        '.webp',
+        '.ico',
+        '.bmp',
+        '.tif',
+        '.tiff',
+        '.heic',
+        '.heif',
+        '.raw',
+        '.psd',
+        # audio / video
+        '.mp3',
+        '.mp4',
+        '.m4a',
+        '.wav',
+        '.flac',
+        '.ogg',
+        '.webm',
+        '.avi',
+        '.mov',
+        '.mkv',
+        '.wmv',
+        # fonts
+        '.woff',
+        '.woff2',
+        '.ttf',
+        '.otf',
+        '.eot',
+        # archives / packages
+        '.zip',
+        '.gz',
+        '.tgz',
+        '.bz2',
+        '.xz',
+        '.7z',
+        '.rar',
+        '.tar',
+        '.jar',
+        '.war',
+        # documents (opaque)
+        '.pdf',
+        '.doc',
+        '.docx',
+        '.xls',
+        '.xlsx',
+        '.ppt',
+        '.pptx',
+        # compiled / binary
+        '.exe',
+        '.dll',
+        '.so',
+        '.dylib',
+        '.o',
+        '.a',
+        '.pyc',
+        '.pyo',
+        '.class',
+        '.wasm',
+        '.bin',
+        '.dat',
+        '.sqlite',
+        '.db',
+        '.pkl',
+        '.pickle',
+    }
+)
+
+# Starter exclude globs written by `redact exclude init`.
+# Binary extensions are always skipped; these are additional defaults for init.
+DEFAULT_EXCLUDES = {
+    # VCS / tooling (also hard-skipped via paths.SKIP_DIR_NAMES)
+    'GIT': '**/.git/**',
+    'GIT_DIR': '.git/**',
+    'MINJS': '**/*.min.js',
+    'MAP': '**/*.map',
+    'PYC': '**/*.pyc',
+    'LOCK_NPM': '**/package-lock.json',
+    'LOCK_PNPM': '**/pnpm-lock.yaml',
+    # images
+    'PNG': '**/*.png',
+    'JPG': '**/*.jpg',
+    'JPEG': '**/*.jpeg',
+    'GIF': '**/*.gif',
+    'WEBP': '**/*.webp',
+    'ICO': '**/*.ico',
+    'BMP': '**/*.bmp',
+    'TIF': '**/*.tif',
+    'TIFF': '**/*.tiff',
+    # audio / video
+    'MP3': '**/*.mp3',
+    'MP4': '**/*.mp4',
+    'WAV': '**/*.wav',
+    'WEBM': '**/*.webm',
+    'MOV': '**/*.mov',
+    # fonts
+    'WOFF': '**/*.woff',
+    'WOFF2': '**/*.woff2',
+    'TTF': '**/*.ttf',
+    # archives
+    'ZIP': '**/*.zip',
+    'GZ': '**/*.gz',
+    'TAR': '**/*.tar',
+    # docs / opaque
+    'PDF': '**/*.pdf',
+    'DOCX': '**/*.docx',
+    'XLSX': '**/*.xlsx',
+}
+
 # Alias for tests and callers that expect the historical name.
 patterns = DEFAULT_PATTERNS
 
 DICT_PATH = Path('redacted/dictionary.yaml')
 PATTERNS_PATH = Path('redacted/patterns.yaml')
+EXCLUDE_PATH = Path('redacted/exclude.yaml')
 GITIGNORE_PATH = Path('.gitignore')
 REDACTED_GITIGNORE_ENTRY = 'redacted/'
 
@@ -234,6 +348,170 @@ def cmd_patterns_remove(args):
     print(f"Removed pattern {name!r} from {PATTERNS_PATH}")
 
 
+def validate_excludes(data):
+    """Return validated ordered dict of name -> glob string, or raise ValueError."""
+    if not isinstance(data, dict):
+        raise ValueError("exclude config must be a mapping of NAME: glob")
+    if not data:
+        raise ValueError("exclude config is empty")
+
+    validated = {}
+    for name, glob in data.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"invalid exclude name: {name!r}")
+        if not isinstance(glob, str) or not glob.strip():
+            raise ValueError(f"exclude {name!r} must be a non-empty glob string")
+        validated[name.strip()] = glob.strip()
+    return validated
+
+
+def load_excludes_file():
+    """Load and validate excludes from EXCLUDE_PATH. Empty mapping allowed."""
+    with open(EXCLUDE_PATH, 'r', encoding='utf-8') as f:
+        data = yaml.safe_load(f)
+    if data is None or data == {}:
+        return {}
+    return validate_excludes(data)
+
+
+def save_excludes(excludes_map):
+    """Write excludes map to EXCLUDE_PATH."""
+    validated = validate_excludes(excludes_map)
+    ensure_redacted_workspace()
+    with open(EXCLUDE_PATH, 'w', encoding='utf-8') as f:
+        yaml.safe_dump(validated, f, default_flow_style=False, sort_keys=False)
+    return validated
+
+
+def load_excludes():
+    """Effective excludes: file if present, otherwise none (empty).
+
+    Unlike patterns, missing exclude.yaml means no path excludes — only the
+    built-in directory skip list in paths.walk_files applies.
+    """
+    if EXCLUDE_PATH.exists():
+        try:
+            return load_excludes_file()
+        except ValueError as exc:
+            print(f"Invalid exclude config ({EXCLUDE_PATH}): {exc}", file=sys.stderr)
+            sys.exit(1)
+    return {}
+
+
+def exclude_globs(excludes_map=None):
+    """Return list of glob strings from an excludes mapping."""
+    if excludes_map is None:
+        excludes_map = load_excludes()
+    return list(excludes_map.values())
+
+
+def cmd_exclude_init(args):
+    if EXCLUDE_PATH.exists() and not args.force:
+        print(f"Exclude file already exists: {EXCLUDE_PATH}", file=sys.stderr)
+        print("Use --force to overwrite with built-in defaults.", file=sys.stderr)
+        sys.exit(1)
+    save_excludes(DEFAULT_EXCLUDES)
+    print(f"Wrote built-in excludes to: {EXCLUDE_PATH}")
+
+
+def cmd_exclude_list(args):
+    if EXCLUDE_PATH.exists():
+        excludes_map = load_excludes_file()
+        source = str(EXCLUDE_PATH)
+    else:
+        excludes_map = {}
+        source = f"none (run: redact exclude init → {EXCLUDE_PATH})"
+
+    if args.yaml:
+        yaml.safe_dump(excludes_map, sys.stdout, default_flow_style=False, sort_keys=False)
+        return
+
+    print(f"Source: {source}")
+    if not excludes_map:
+        print("(no excludes)")
+        return
+    width = max(len(name) for name in excludes_map)
+    for name, glob in excludes_map.items():
+        print(f"{name.ljust(width)}  {glob}")
+
+
+def cmd_exclude_add(args):
+    name = args.name.strip()
+    if not name:
+        print("Exclude name must be non-empty.", file=sys.stderr)
+        sys.exit(1)
+
+    glob = args.glob.strip()
+    if not glob:
+        print("Glob must be non-empty.", file=sys.stderr)
+        sys.exit(1)
+
+    if EXCLUDE_PATH.exists():
+        excludes_map = load_excludes_file()
+    else:
+        excludes_map = {}
+
+    created = name not in excludes_map
+    excludes_map[name] = glob
+    save_excludes(excludes_map)
+    action = "Added" if created else "Updated"
+    print(f"{action} exclude {name!r} in {EXCLUDE_PATH}")
+
+
+def cmd_exclude_remove(args):
+    name = args.name.strip()
+    if not EXCLUDE_PATH.exists():
+        print(f"Exclude file not found: {EXCLUDE_PATH}", file=sys.stderr)
+        print("Run: redact exclude init", file=sys.stderr)
+        sys.exit(1)
+
+    excludes_map = load_excludes_file()
+    if name not in excludes_map:
+        if args.ignore_missing:
+            print(f"Exclude {name!r} not present; nothing to do.")
+            return
+        print(f"Exclude not found: {name!r}", file=sys.stderr)
+        sys.exit(1)
+
+    del excludes_map[name]
+    if not excludes_map:
+        print("Warning: no excludes left.", file=sys.stderr)
+        ensure_redacted_workspace()
+        with open(EXCLUDE_PATH, 'w', encoding='utf-8') as f:
+            yaml.safe_dump({}, f, default_flow_style=False, sort_keys=False)
+    else:
+        save_excludes(excludes_map)
+
+    print(f"Removed exclude {name!r} from {EXCLUDE_PATH}")
+
+
+def collect_matches(content, active_patterns):
+    """Return list of (pattern_name, matched_text) without mutating content."""
+    found = []
+    for key, pattern in active_patterns.items():
+        for match in sorted(set(re.findall(pattern, content))):
+            found.append((key, match))
+    return found
+
+
+def is_binary_extension(path: Path) -> bool:
+    """True if path has a known binary/image/audio/archive extension."""
+    return path.suffix.lower() in BINARY_EXTENSIONS
+
+
+def looks_like_binary_content(path: Path, sample_size: int = 8192) -> bool:
+    """Heuristic: NUL bytes in the first sample_size bytes ⇒ binary."""
+    with open(path, 'rb') as handle:
+        chunk = handle.read(sample_size)
+    return b'\x00' in chunk
+
+
+def read_text_file(path: Path) -> str:
+    """Read path as UTF-8 text, or raise UnicodeDecodeError / OSError."""
+    with open(path, 'r', encoding='utf-8') as infile:
+        return infile.read()
+
+
 def _redact_content(content, active_patterns, dictionary, reverse_dict):
     """Apply patterns to content, updating dictionary/reverse_dict in place."""
     for key, pattern in active_patterns.items():
@@ -248,25 +526,55 @@ def _redact_content(content, active_patterns, dictionary, reverse_dict):
     return content
 
 
-def redact_file(input_path: Path, active_patterns=None, dictionary=None, reverse_dict=None):
-    """Redact a single file. Optionally reuse shared patterns/dictionary for batch runs."""
+def redact_file(
+    input_path: Path,
+    active_patterns=None,
+    dictionary=None,
+    reverse_dict=None,
+    dry_run=False,
+):
+    """Redact a single file. Optionally reuse shared patterns/dictionary for batch runs.
+
+    Raises FileNotFoundError if the path is missing. Skips binary files (logs to
+    stderr and returns without writing). Other I/O or decode errors propagate
+    so batch callers can log and continue.
+    """
     input_path = Path(input_path)
     if not input_path.exists():
-        print(f"File not found: {input_path}", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError(f"File not found: {input_path}")
 
     owns_dictionary = dictionary is None
     if active_patterns is None:
         active_patterns = load_patterns()
         if not active_patterns:
-            print("Warning: no patterns configured; writing file unchanged.", file=sys.stderr)
+            print(
+                "Warning: no patterns configured; writing file unchanged.",
+                file=sys.stderr,
+            )
     if dictionary is None:
         dictionary = load_dictionary()
     if reverse_dict is None:
         reverse_dict = {v: k for k, v in dictionary.items()}
 
-    with open(input_path, 'r', encoding='utf-8') as infile:
-        content = infile.read()
+    if is_binary_extension(input_path):
+        print(f"Skipping binary file: {input_path}", file=sys.stderr)
+        return dictionary, reverse_dict
+
+    if looks_like_binary_content(input_path):
+        print(f"Skipping binary file: {input_path}", file=sys.stderr)
+        return dictionary, reverse_dict
+
+    content = read_text_file(input_path)
+
+    if dry_run:
+        matches = collect_matches(content, active_patterns)
+        print(f"Would redact: {input_path}")
+        if not matches:
+            print("  (no matches)")
+        else:
+            for key, match in matches:
+                print(f"  {key}: {match}")
+        return dictionary, reverse_dict
 
     content = _redact_content(content, active_patterns, dictionary, reverse_dict)
 
@@ -282,37 +590,95 @@ def redact_file(input_path: Path, active_patterns=None, dictionary=None, reverse
     return dictionary, reverse_dict
 
 
-def redact_files(input_paths):
+def redact_files(input_paths, dry_run=False):
     """Redact one or more files or directories, sharing placeholders across the batch.
 
     Directories are walked recursively (skipping names like redacted/, .git/, etc.).
+    Path excludes from redacted/exclude.yaml are applied after expansion.
+    Per-file errors are logged to stderr; processing continues. Exit status is
+    non-zero if any path failed.
     """
     paths, missing = expand_paths(input_paths)
-    if missing:
-        for path in missing:
-            print(f"File not found: {path}", file=sys.stderr)
-        sys.exit(1)
+    errors = 0
+    for path in missing:
+        print(f"Error: File not found: {path}", file=sys.stderr)
+        errors += 1
+
+    excludes_map = load_excludes()
+    globs = exclude_globs(excludes_map)
+    paths, skipped = filter_excluded(paths, globs)
+    for path in skipped:
+        print(f"Excluded: {path}")
+
+    # Always drop known binary/image extensions (even without exclude.yaml)
+    remaining = []
+    for path in paths:
+        if is_binary_extension(path):
+            print(f"Skipping binary file: {path}", file=sys.stderr)
+        else:
+            remaining.append(path)
+    paths = remaining
+
     if not paths:
+        if errors:
+            print(f"Completed with {errors} error(s).", file=sys.stderr)
+            sys.exit(1)
         print("No files to redact.", file=sys.stderr)
         sys.exit(1)
 
     active_patterns = load_patterns()
     if not active_patterns:
-        print("Warning: no patterns configured; writing files unchanged.", file=sys.stderr)
+        print(
+            "Warning: no patterns configured; writing files unchanged.",
+            file=sys.stderr,
+        )
+
+    if dry_run:
+        print(f"Dry run: {len(paths)} file(s) (no writes)")
 
     dictionary = load_dictionary()
     reverse_dict = {v: k for k, v in dictionary.items()}
+    processed = 0
 
     for input_path in paths:
-        redact_file(
-            input_path,
-            active_patterns=active_patterns,
-            dictionary=dictionary,
-            reverse_dict=reverse_dict,
-        )
+        try:
+            redact_file(
+                input_path,
+                active_patterns=active_patterns,
+                dictionary=dictionary,
+                reverse_dict=reverse_dict,
+                dry_run=dry_run,
+            )
+            processed += 1
+        except FileNotFoundError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            errors += 1
+        except UnicodeDecodeError:
+            print(
+                f"Skipping binary/non-UTF-8 file: {input_path}",
+                file=sys.stderr,
+            )
+        except OSError as exc:
+            print(f"Error: {input_path}: {exc}", file=sys.stderr)
+            errors += 1
+        except Exception as exc:  # noqa: BLE001 — keep batch going
+            print(f"Error: {input_path}: {exc}", file=sys.stderr)
+            errors += 1
 
-    save_dictionary(dictionary)
-    print(f"Placeholder dictionary updated at: {DICT_PATH}")
+    if dry_run:
+        print("Dry run complete; no files or dictionary written.")
+        if errors:
+            print(f"Completed with {errors} error(s).", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if processed:
+        save_dictionary(dictionary)
+        print(f"Placeholder dictionary updated at: {DICT_PATH}")
+
+    if errors:
+        print(f"Completed with {errors} error(s).", file=sys.stderr)
+        sys.exit(1)
 
 
 def print_version():
@@ -339,21 +705,27 @@ def build_parser():
         prog='redact',
         description=(
             'Redact sensitive values from files and directories, '
-            'or manage redaction patterns.'
+            'or manage patterns and path excludes.'
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""\
 examples:
   redact config.env                 redact one file → redacted/config.env
+  redact -n src/                    dry-run a tree (show matches, no writes)
   redact a.txt b.env src/           multiple files and/or directories
   redact patterns init              write built-in patterns to {PATTERNS_PATH}
-  redact patterns list              show effective patterns
   redact patterns add GOV '\\b...gov\\b'
+  redact exclude init               write starter path globs to {EXCLUDE_PATH}
+  redact exclude add VENDOR 'vendor/**'
   redact help patterns              help for the patterns command
 
-Outputs under redacted/ (cwd-relative). Uses {PATTERNS_PATH} when present;
-otherwise built-in defaults. Directory walks skip redacted/, .git/,
-node_modules/, virtualenvs, and similar paths.
+behavior (cwd-relative outputs under redacted/):
+  patterns   {PATTERNS_PATH} if present, else built-ins (IP, EMAIL, APIKEY, …)
+  excludes   optional {EXCLUDE_PATH} globs after path expansion
+  always     skip .git/ and other VCS/venv/cache dirs; skip binary/image
+             extensions and non-UTF-8 / NUL-byte files
+  errors     log to stderr and continue; exit 1 if any path failed
+  dry-run    -n / --dry-run shows matches only (no writes)
 """,
     )
     parser.add_argument(
@@ -361,6 +733,12 @@ node_modules/, virtualenvs, and similar paths.
         '--version',
         action='version',
         version=f'%(prog)s {__version__}',
+    )
+    parser.add_argument(
+        '-n',
+        '--dry-run',
+        action='store_true',
+        help='Show matches only; do not write redacted files or dictionary',
     )
     sub = parser.add_subparsers(dest='command')
 
@@ -422,13 +800,69 @@ node_modules/, virtualenvs, and similar paths.
     )
     p_remove.set_defaults(func=cmd_patterns_remove)
 
+    exclude_parser = sub.add_parser(
+        'exclude',
+        help='List, add, remove, or initialize path exclude globs',
+        description=(
+            f'Manage {EXCLUDE_PATH} (name → glob). Matching paths are skipped '
+            f'when redacting. If the file is missing, no extra globs apply — '
+            f'but .git/, other tool dirs, and binary/image extensions are still '
+            f'always skipped. Run `exclude init` for starter globs (includes '
+            f'.git/**, images, archives, …).'
+        ),
+    )
+    exclude_sub = exclude_parser.add_subparsers(dest='exclude_command', required=True)
+
+    e_init = exclude_sub.add_parser(
+        'init',
+        help=f'Write starter excludes to {EXCLUDE_PATH}',
+    )
+    e_init.add_argument(
+        '--force',
+        action='store_true',
+        help='Overwrite an existing exclude file',
+    )
+    e_init.set_defaults(func=cmd_exclude_init)
+
+    e_list = exclude_sub.add_parser(
+        'list',
+        help='Show effective excludes (file if present, else none)',
+    )
+    e_list.add_argument(
+        '--yaml',
+        action='store_true',
+        help='Print excludes as YAML',
+    )
+    e_list.set_defaults(func=cmd_exclude_list)
+
+    e_add = exclude_sub.add_parser(
+        'add',
+        help='Add or update an exclude glob (creates empty config if missing)',
+    )
+    e_add.add_argument('name', help='Exclude name (e.g. VENDOR)')
+    e_add.add_argument('glob', help="Glob pattern (e.g. 'vendor/**' or '**/*.min.js')")
+    e_add.set_defaults(func=cmd_exclude_add)
+
+    e_remove = exclude_sub.add_parser(
+        'remove',
+        help='Remove an exclude from the config file',
+    )
+    e_remove.add_argument('name', help='Exclude name to remove')
+    e_remove.add_argument(
+        '--ignore-missing',
+        action='store_true',
+        help='Do not error if the exclude is not defined',
+    )
+    e_remove.set_defaults(func=cmd_exclude_remove)
+
     parser.add_argument(
         'files',
         nargs='*',
         metavar='path',
         help=(
             'File(s) or directory(ies) to redact. Directories are walked '
-            'recursively. Writes under redacted/ and updates dictionary.yaml.'
+            'recursively. Writes under redacted/ and updates dictionary.yaml '
+            'unless --dry-run.'
         ),
     )
     return parser
@@ -460,8 +894,8 @@ def main(argv=None):
         print_version()
         return
 
-    # Prefer explicit subcommands; otherwise treat remaining args as files to redact.
-    if head == 'patterns':
+    # Config management subcommands (must not treat file paths as subcommands)
+    if head in ('patterns', 'exclude'):
         args = parser.parse_args(argv)
         try:
             args.func(args)
@@ -470,20 +904,29 @@ def main(argv=None):
             sys.exit(1)
         return
 
-    if head.startswith('-'):
-        # Unknown flags: let argparse report usage / handle known options.
-        args = parser.parse_args(argv)
-        if not args.files:
+    # File redaction: parse flags manually so paths are not confused with subcommands.
+    dry_run = False
+    files = []
+    for arg in argv:
+        if arg in ('-n', '--dry-run'):
+            dry_run = True
+        elif arg in ('-h', '--help'):
             parser.print_help()
-            sys.exit(1)
-        redact_files(args.files)
-        return
+            return
+        elif arg in ('-V', '--version'):
+            print_version()
+            return
+        elif arg.startswith('-'):
+            print(f"Unknown option: {arg}", file=sys.stderr)
+            parser.print_help()
+            sys.exit(2)
+        else:
+            files.append(arg)
 
-    # One or more file paths (none of the reserved subcommands).
-    if any(arg.startswith('-') for arg in argv):
-        parser.error(f"unexpected option among files: {' '.join(argv)}")
-
-    redact_files(argv)
+    if not files:
+        parser.print_help()
+        sys.exit(1)
+    redact_files(files, dry_run=dry_run)
 
 
 if __name__ == "__main__":

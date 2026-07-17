@@ -49,12 +49,21 @@ def test_main_requires_argument(redact_mod, workdir, monkeypatch, capsys):
     assert "usage:" in captured.out.lower() or "usage:" in captured.err.lower()
 
 
+def test_main_dry_run_flag_after_file(redact_mod, workdir, monkeypatch, capsys):
+    Path("z.txt").write_text("ip=1.2.3.4\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["redact", "z.txt", "--dry-run"])
+    redact_mod.main()
+    assert "Would redact: z.txt" in capsys.readouterr().out
+    assert not Path("redacted/z.txt").exists()
+
+
 def test_main_missing_file(redact_mod, workdir, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["redact", "nope.txt"])
     with pytest.raises(SystemExit) as exc:
         redact_mod.main()
     assert exc.value.code == 1
-    assert "File not found" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "File not found" in err
 
 
 def test_main_redacts_patterns_and_writes_outputs(redact_mod, workdir, monkeypatch, capsys):
@@ -181,14 +190,18 @@ def test_main_redacts_multiple_files(redact_mod, workdir, monkeypatch, capsys):
     assert by_value["10.0.0.1"] in b
 
 
-def test_main_multiple_files_missing_any_fails(redact_mod, workdir, monkeypatch, capsys):
-    Path("ok.txt").write_text("x\n", encoding="utf-8")
+def test_main_multiple_files_missing_continues(redact_mod, workdir, monkeypatch, capsys):
+    Path("ok.txt").write_text("ip=10.0.0.1\n", encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["redact", "ok.txt", "missing.txt"])
     with pytest.raises(SystemExit) as exc:
         redact_mod.main()
     assert exc.value.code == 1
-    assert "File not found: missing.txt" in capsys.readouterr().err
-    assert not Path("redacted/ok.txt").exists()
+    err = capsys.readouterr().err
+    assert "File not found: missing.txt" in err
+    assert "Completed with" in err
+    # Successful file still processed
+    assert Path("redacted/ok.txt").is_file()
+    assert "10.0.0.1" not in Path("redacted/ok.txt").read_text(encoding="utf-8")
 
 
 def test_main_redacts_directory_recursively(redact_mod, workdir, monkeypatch, capsys):

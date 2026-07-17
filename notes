@@ -1,17 +1,26 @@
-Install CLI (available from anywhere):
+Install CLI (anywhere on PATH):
   mise run setup
   # or: uv tool install --force --editable .
 
-Refresh / uninstall CLI:
+Refresh / uninstall:
   mise run install-cli
   mise run uninstall-cli
 
 Dev:
   mise run install
-  mise run test          # coverage gate ≥90%
+  mise run test          # coverage ≥90%
   mise run test-fast
 
-Help:
+Help (keep in sync with README behavior table):
   redact help
   redact help patterns
+  redact help exclude
   unredact -h
+
+Dry-run / config:
+  redact -n src/
+  redact patterns init|list|add|remove
+  redact exclude init|list|add|remove   # .git/** in starter excludes
+
+Always skipped: .git/ (and other tool dirs), binary/image extensions, non-UTF-8.
+Branch: master (not main).

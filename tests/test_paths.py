@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from redactor.paths import SKIP_DIR_NAMES, expand_paths, walk_files
+from redactor.paths import ALWAYS_SKIP_DIR_NAMES, SKIP_DIR_NAMES, expand_paths, walk_files
 
 
 def test_walk_files_nested(workdir):
@@ -35,6 +35,28 @@ def test_walk_skips_redacted_and_vcs(workdir):
     found = {p.as_posix() for p in walk_files(Path("tree"))}
     assert found == {"tree/src/ok.txt"}
     assert "redacted" in SKIP_DIR_NAMES
+    assert ".git" in SKIP_DIR_NAMES
+    assert ".git" in ALWAYS_SKIP_DIR_NAMES
+
+
+def test_walk_skips_git_when_git_is_root(workdir):
+    Path(".git/objects").mkdir(parents=True)
+    Path(".git/HEAD").write_text("ref: refs/heads/master\n", encoding="utf-8")
+    Path(".git/objects/pack").mkdir(parents=True)
+    Path(".git/objects/pack/x").write_text("blob\n", encoding="utf-8")
+    assert walk_files(Path(".git")) == []
+    files, missing = expand_paths([".git"])
+    assert files == []
+    assert missing == []
+
+
+def test_expand_paths_skips_paths_under_git(workdir):
+    Path("proj/.git/objects").mkdir(parents=True)
+    Path("proj/.git/objects/x").write_text("x\n", encoding="utf-8")
+    Path("proj/app.txt").write_text("ok\n", encoding="utf-8")
+    files, missing = expand_paths(["proj"])
+    assert missing == []
+    assert [p.as_posix() for p in files] == ["proj/app.txt"]
 
 
 def test_expand_paths_mix_file_and_dir(workdir):

@@ -5,11 +5,11 @@ CLI tools that redact sensitive values in local files and restore them later.
 - **`redact`** — match patterns → placeholders → write under `redacted/` and update `dictionary.yaml`
 - **`unredact`** — replace placeholders using the dictionary → write originals back
 
-Commands are installable on your `PATH` and work from any directory. All `redacted/` paths are relative to your **current working directory**.
+Commands install on your `PATH` and work from any directory. All `redacted/` paths are relative to the **current working directory**.
 
 ## Install
 
-**Requirements:** [mise](https://mise.jdx.dev/) (recommended) or Python 3.12+ and [uv](https://docs.astral.sh/uv/). Ensure `~/.local/bin` is on your `PATH`.
+**Requirements:** [mise](https://mise.jdx.dev/) (recommended) or Python 3.12+ and [uv](https://docs.astral.sh/uv/). Put `~/.local/bin` on your `PATH`.
 
 ```bash
 # from this repo
@@ -22,8 +22,6 @@ Without mise:
 ```bash
 uv tool install --force --editable .
 ```
-
-Then from anywhere:
 
 ```bash
 redact version
@@ -39,104 +37,125 @@ unredact path/to/file
 | Tests + coverage (≥90%) | `mise run test` |
 | Tests only | `mise run test-fast` |
 
-## Usage
+Default git branch: **`master`** (not `main`).
 
-### Help and version
+## Behavior specification
 
-```bash
-redact help                 # top-level usage and examples
-redact help patterns        # patterns subcommand
-redact help patterns add    # nested command help
-redact version              # e.g. redact 0.1.0
-redact -V / --version
+### Redact
 
-unredact -h                 # unredact usage
-unredact --help
-```
-
-### Redact files and directories
-
-Writes `redacted/<path>` and updates `redacted/dictionary.yaml`. Uses `redacted/patterns.yaml` when present; otherwise built-in defaults.
+| Rule | Spec |
+|------|------|
+| **Inputs** | One or more files and/or directories |
+| **Output** | `redacted/<path>` (layout preserved) + update `redacted/dictionary.yaml` |
+| **Patterns** | `redacted/patterns.yaml` if present; else built-ins: `IP`, `EMAIL`, `APIKEY`, `TOKEN`, `PASSWORD`, `GOV` (order fixed; EMAIL before GOV) |
+| **Placeholders** | `{NAME}_{8 hex chars}`; same secret → same placeholder for the whole batch |
+| **Dir skips (always)** | Never walk/process path components: `.git`, `.hg`, `.svn`, `.venv`, `venv`, `__pycache__`, `.pytest_cache`, `node_modules`, `.tox`, `.mypy_cache`, `.ruff_cache`, `.eggs`, `dist`, `build`. Also prune source trees named `redacted/` (tool workspace). Explicit `redact .git` yields no files |
+| **Path excludes** | Optional `redacted/exclude.yaml` (name → glob), applied after expansion |
+| **Binary skip (always)** | Known binary/image/audio/archive extensions; NUL-byte samples; non-UTF-8 decode |
+| **Dry-run** | `-n` / `--dry-run`: print matches only; no redacted files, no dictionary write |
+| **Errors** | Log to **stderr**, continue other files; exit **1** if any failed; dictionary still saved for successes |
+| **`.gitignore`** | On write under `redacted/`, ensure `redacted/` is listed in `.gitignore` |
 
 ```bash
 redact config.env
-redact file1.txt file2.env path/to/more.cfg   # multiple files
-redact src/ configs/                          # directories (recursive)
-redact app/ root.env                          # mix files and directories
+redact file1.txt file2.env src/
+redact --dry-run src/
+redact -n config.env
 ```
 
-- **Shared placeholders** across the whole batch (same secret → same placeholder).
-- **Directory walks** skip `redacted/`, `.git/`, `node_modules/`, virtualenvs, caches, and similar paths.
-- **Missing any path** → error; nothing is written for that run’s failed expansion.
+### Patterns CLI
 
-### Manage patterns
-
-Config file: `redacted/patterns.yaml` (name → regex). **Order matters** (applied top to bottom; e.g. `EMAIL` before `GOV`).
+File: `redacted/patterns.yaml` (`NAME: regex`). Order = application order.
 
 ```bash
-redact patterns init              # write built-in defaults
-redact patterns init --force      # overwrite existing file
-redact patterns list              # effective patterns (file or built-ins)
-redact patterns list --yaml
-redact patterns add NAME 'regex'  # add/update; seeds defaults if file missing
-redact patterns remove NAME
-redact patterns remove NAME --ignore-missing
+redact patterns init | init --force
+redact patterns list | list --yaml
+redact patterns add NAME 'regex'     # seeds built-ins if file missing
+redact patterns remove NAME [--ignore-missing]
 ```
 
-Quote regexes for the shell:
+Built-in defaults (also what `patterns init` writes):
+
+| Name | Matches (summary) |
+|------|-------------------|
+| `IP` | IPv4-like `a.b.c.d` |
+| `EMAIL` | email addresses |
+| `APIKEY` | value after `API_KEY=` |
+| `TOKEN` | value after `TOKEN=` |
+| `PASSWORD` | non-space value after `PASSWORD=` |
+| `GOV` | hostnames ending in `.gov` |
+
+### Exclude CLI
+
+File: `redacted/exclude.yaml` (`NAME: glob`). Same subcommands as patterns.
 
 ```bash
-redact patterns add GOV '\b(?:[A-Za-z0-9-]+\.)+gov\b'
+redact exclude init | init --force   # starter set (git, images, archives, locks, …)
+redact exclude list | list --yaml
+redact exclude add NAME 'glob'       # creates empty file if missing, then adds
+redact exclude remove NAME [--ignore-missing]
 ```
 
-You can edit `redacted/patterns.yaml` by hand; invalid regexes are rejected when loading.
+| When | Path globs from `exclude.yaml` | Always applied |
+|------|--------------------------------|----------------|
+| File **missing** | none | dir skips + binary heuristics |
+| File **present** | yes | dir skips + binary heuristics |
+| `exclude init` | writes `DEFAULT_EXCLUDES` (includes `GIT` / `GIT_DIR` → `.git/**`, images, pdf, zip, …) | — |
 
-### Unredact files and directories
+### Unredact
 
-Arguments are **original** paths (not paths under `redacted/`). Content is read from `redacted/<path>` and written back to `<path>`.
+| Rule | Spec |
+|------|------|
+| **Args** | Original paths (not `redacted/…`) |
+| **Read** | `redacted/<path>` + `redacted/dictionary.yaml` (required) |
+| **Write** | Restored content at original path (overwrites) |
+| **Dirs** | Same walk/skip rules as redact; if original tree missing, discover via `redacted/<dir>/` |
+| **Paste** | Only when a **single** file is expanded and redacted copy is missing |
+| **Errors** | stderr + continue; exit 1 if any failed |
 
 ```bash
 unredact config.env
-unredact file1.txt file2.env
-unredact src/                     # whole tree
+unredact a.txt b.env src/
 ```
 
-- Requires `redacted/dictionary.yaml` (created by `redact`).
-- Directories use the same recursive walk / skip rules as `redact`.
-- If the original tree is gone, discovery can use `redacted/<dir>/`.
-- **Single file** missing under `redacted/`: you may paste content on stdin (EOF to finish).
-- **Multiple files**: missing redacted copy is an error.
+## Help
+
+```bash
+redact help
+redact help patterns
+redact help patterns add
+redact help exclude
+redact version | -V | --version
+unredact -h | --help
+```
 
 ## Layout
 
 ```
 redactor/                 # installable package
-  redact.py               # redact CLI, patterns, DEFAULT_PATTERNS
+  redact.py               # CLI, DEFAULT_PATTERNS, BINARY_EXTENSIONS, DEFAULT_EXCLUDES
   unredact.py
-  paths.py                # file/directory expansion
-bin/                      # thin wrappers (need package installed)
+  paths.py                # expand/walk; ALWAYS_SKIP_DIR_NAMES (.git, …)
+bin/                      # thin wrappers
 tests/
-pyproject.toml            # package + entry points
+pyproject.toml
 mise.toml
 README.md
 AGENTS.md
 
 # created in the directory you run from (gitignored):
 redacted/
-  patterns.yaml           # optional pattern config
-  dictionary.yaml         # sensitive placeholder map
+  patterns.yaml           # optional
+  exclude.yaml            # optional
+  dictionary.yaml         # sensitive
   …                       # mirrored redacted files
 ```
 
 ## Security
 
-- **`redacted/dictionary.yaml` is sensitive** (original values). Do not commit or share it unless authorized.
-- **`redacted/` is gitignored.** The repo lists `redacted/`; `redact` also appends that entry to `.gitignore` if missing when it writes under `redacted/`.
-- Pattern config is generally not secret; the dictionary is.
-
-## Customization
-
-Prefer `redact patterns …` (or edit `redacted/patterns.yaml`) for day-to-day rules. Built-in defaults live in `redactor/redact.py` as `DEFAULT_PATTERNS` until you `patterns init` or `patterns add`.
+- **`redacted/dictionary.yaml` is sensitive** — do not commit or share unless authorized.
+- **`redacted/` is gitignored**; `redact` also appends `redacted/` to `.gitignore` when writing under `redacted/`.
+- Patterns/excludes are config, not secrets; the dictionary is.
 
 ## License
 

@@ -1,87 +1,79 @@
 # AGENTS.md
 
-Guidance for AI coding agents. Human-facing docs: [README.md](README.md).
+Human docs and full behavior table: [README.md](README.md). Keep this file aligned when CLI contracts change.
 
-## What this project is
-
-Installable CLIs that redact sensitive values and restore them later:
+## Product
 
 | Command | Role |
 |---------|------|
-| `redact` | Patterns → placeholders → `redacted/<path>` + `redacted/dictionary.yaml` |
-| `unredact` | Dictionary substitution → write originals at the given paths |
+| `redact` | Patterns → placeholders → `redacted/<path>` + `dictionary.yaml` |
+| `unredact` | Dictionary substitution → original paths |
 
-Package + `pyproject.toml` entry points. Runtime dep: `PyYAML`. Tests: pytest + coverage (≥90%).
+Package + entry points in `pyproject.toml`. Runtime: `PyYAML`. Tests: pytest, coverage ≥90%. Default branch: **`master`**.
 
 ## Layout
 
 ```
 redactor/
-  __init__.py       # __version__
-  redact.py         # redact CLI, DEFAULT_PATTERNS, pattern management
-  unredact.py       # restore CLI
-  paths.py          # expand files/dirs (shared walk + skip rules)
-bin/                # thin wrappers only
+  redact.py      # DEFAULT_PATTERNS, BINARY_EXTENSIONS, DEFAULT_EXCLUDES, CLI
+  unredact.py
+  paths.py       # ALWAYS_SKIP_DIR_NAMES (includes .git), expand/walk/exclude globs
+bin/             # wrappers only
 tests/
-pyproject.toml      # package, console_scripts, coverage config
-mise.toml           # setup / install / install-cli / test / test-fast
 ```
 
-`redacted/` is created in the **caller’s cwd**, not next to the package install.
+`redacted/` is always under the **caller’s cwd**.
 
-## Global install
+## Contracts (must stay true)
+
+### Patterns (`redacted/patterns.yaml`)
+
+- CLI: `redact patterns init|list|add|remove`
+- Missing file → `DEFAULT_PATTERNS` (IP, EMAIL, APIKEY, TOKEN, PASSWORD, GOV)
+- Present → that file only; validate with `re.compile`
+- Order = application order; EMAIL before GOV
+- `patterns add` without file seeds defaults then sets name
+
+### Excludes (`redacted/exclude.yaml`)
+
+- CLI: `redact exclude init|list|add|remove` (same shape as patterns)
+- Missing file → **no extra globs**, but always-on skips still apply (below)
+- `exclude init` → `DEFAULT_EXCLUDES` (includes `GIT` / `GIT_DIR` for `.git/**`, binaries, locks, …)
+- `exclude add` without file starts from `{}`
+
+### Always-on skips (even without exclude.yaml)
+
+1. **Dirs:** any path component in `ALWAYS_SKIP_DIR_NAMES` (must include **`.git`**); walk also prunes `redacted/` as a source dir name
+2. **Binary:** `BINARY_EXTENSIONS`; NUL-byte heuristic; UTF-8 decode failures
+3. Explicit roots named `.git` or `redacted` produce no redact sources
+
+### Redact batch
+
+- Multi-file/dir share one dictionary for the run
+- `-n` / `--dry-run`: matches only, no writes
+- Errors → stderr, continue; exit 1 if any error; save dictionary if anything succeeded
+- On write: `ensure_redacted_gitignored()`
+
+### Unredact batch
+
+- Args are original paths; content from `redacted/<path>`
+- Paste stdin only for a single expanded missing redacted file
+- Errors → stderr, continue; exit 1 if any error
+
+## Install / test
 
 ```bash
 mise run setup
-# or: mise run install-cli
-# or: uv tool install --force --editable .
+mise run test          # coverage fail_under 90
+mise run install-cli   # refresh global tools after entry-point changes
 ```
-
-- Entry points: `redact = redactor.redact:main`, `unredact = redactor.unredact:main`
-- Editable install tracks this checkout; re-run `install-cli` if the clone moves
-- Keep implementation in `redactor/`, not `bin/`
-
-## Patterns
-
-Prefer CLI (writes `redacted/patterns.yaml` in cwd):
-
-```bash
-redact patterns init|list|add|remove
-```
-
-1. File present → use only that file (validated / `re.compile`).
-2. Else → `DEFAULT_PATTERNS` in `redactor/redact.py`.
-
-Order is application order. `EMAIL` before `GOV` so `user@agency.gov` is an email first. `patterns add` seeds defaults if the file is missing; new names append at the end. `unredact` is pattern-agnostic.
-
-## Redact / unredact contract
-
-- Dictionary: `{ "PREFIX_hex8": "original", ... }` at `redacted/dictionary.yaml`
-- Same original value → same placeholder (including across multi-file batches)
-- `redact a b c` / dirs: one load/save of the dictionary for the batch
-- Dirs: `redactor.paths.expand_paths` — skip `redacted/`, VCS, venv, `node_modules`, etc.
-- Unredact args are **original** paths; content from `redacted/<path>`; paste only for a single expanded file
-- Unredact overwrites the original path
 
 ## Security
 
-- Treat `dictionary.yaml` and unredacted sources as sensitive; never commit/upload unless asked
-- Keep `redacted/` gitignored (`ensure_redacted_gitignored()` on write)
-- Use fake secrets in tests/examples
-
-## Dependencies & checks
-
-```bash
-mise trust
-mise run setup
-mise run test          # pytest --cov; fail_under 90
-```
-
-When changing CLI or package behavior: update tests + docs/help strings, run `mise run test`. Re-run `install-cli` if entry points change.
+- Never commit `dictionary.yaml` or real secrets
+- Fake values only in tests/docs
 
 ## Style
 
-- Small, imperative, dependency-light
-- Implementation in `redactor/`; `bin/` wrappers only
-- Minimal diffs
-- **Default branch is `master` (not `main`).** Use `master` for base branches, PRs, and docs.
+- Implementation in `redactor/`, not `bin/`
+- Minimal diffs; keep README behavior table and CLI help epilog in sync with code

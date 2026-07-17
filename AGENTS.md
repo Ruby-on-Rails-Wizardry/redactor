@@ -84,3 +84,4 @@ When changing CLI or package behavior: update tests + docs/help strings, run `mi
 - Small, imperative, dependency-light
 - Implementation in `redactor/`; `bin/` wrappers only
 - Minimal diffs
+- **Default branch is `master` (not `main`).** Use `master` for base branches, PRs, and docs.

@@ -83,7 +83,7 @@ CI (GitHub Actions on `master`): `.github/workflows/ci.yml` — install `.[dev]`
 
 When shipping user-visible changes, update [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]` (Keep a Changelog). Move entries into a version section when cutting a release.
 
-**Releases:** follow [docs/RELEASE.md](docs/RELEASE.md) (test, changelog, version bump, docs, commit, annotated tag `vX.Y.Z`, push `master` + tag, verify CI).
+**Releases:** follow [docs/RELEASE.md](docs/RELEASE.md) — test → changelog → version → docs → commit → tag → push `master` + tag → **`gh release create` (required)** → verify CI.
 
 ## Security
 

@@ -46,7 +46,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history (Keep a Changelog).
 ### Releasing
 
 See **[docs/RELEASE.md](docs/RELEASE.md)** for the full checklist  
-(`test → changelog → version → docs → commit → tag → push → CI`).
+(`test → changelog → version → docs → commit → tag → push → **GitHub Release** → CI`).
 
 ### CI
 

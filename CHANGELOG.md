@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+<!-- Next changes go here. GitHub Release via `gh release create` is required at cut time (see docs/RELEASE.md). -->
+
 ## [0.3.0] - 2026-07-17
 
 ### Added

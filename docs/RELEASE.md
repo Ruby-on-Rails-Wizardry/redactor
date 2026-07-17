@@ -2,6 +2,8 @@
 
 How to cut a version of **redactor**. Default branch is **`master`**.
 
+A release is **not done** until the GitHub Release exists for the tag.
+
 ## Preconditions
 
 - [ ] Working tree clean (`git status`)
@@ -12,6 +14,8 @@ How to cut a version of **redactor**. Default branch is **`master`**.
   - `pyproject.toml` → `project.version`
   - `redactor/__init__.py` → `__version__`
   - `redact version` prints the same value after install
+- [ ] [`gh`](https://cli.github.com/) is installed and authenticated (`gh auth status`)
+  - Needs `repo` scope and write access to `Ruby-on-Rails-Wizardry/redactor`
 
 ## Checklist
 
@@ -64,6 +68,7 @@ Files:
 - [ ] AGENTS.md contracts still accurate
 - [ ] TODO.md checkboxes updated for shipped items
 - [ ] `redact help` / `unredact -h` still sensible (epilog/examples)
+- [ ] This file still matches how you actually release
 
 ### 5. Commit
 
@@ -83,30 +88,61 @@ Annotated tag required:
 git tag -a vX.Y.Z -m "vX.Y.Z — short summary"
 ```
 
-### 7. Push
+### 7. Push branch and tag
 
 ```bash
 git push origin master
 git push origin vX.Y.Z
 ```
 
-### 8. Verify CI
+### 8. Create the GitHub Release (**required**)
 
-- GitHub Actions on the tag/commit is green
-- Optional: create a GitHub Release from the tag (paste CHANGELOG section)
+Publish notes from the changelog section for this version. Prefer extracting just that section:
 
 ```bash
-# optional, if gh is installed
-gh release create vX.Y.Z --title "vX.Y.Z" --notes-file - <<'EOF'
-# paste the CHANGELOG section for this version
-EOF
+# Extract notes between ## [X.Y.Z] and the next ## heading
+awk '/^## \[X.Y.Z\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > /tmp/release-notes.md
+
+gh release create vX.Y.Z \
+  --repo Ruby-on-Rails-Wizardry/redactor \
+  --title "vX.Y.Z" \
+  --notes-file /tmp/release-notes.md \
+  --verify-tag
 ```
 
-### 9. Post-release
+If the tag already exists on the remote but the release was skipped:
 
-- Confirm `git describe --tags` (or GitHub UI) shows `vX.Y.Z`
-- New work goes under `[Unreleased]` again
-- Optionally bump to the next development version (e.g. `X.Y+1.0`) only when you start that cycle
+```bash
+gh release create vX.Y.Z \
+  --repo Ruby-on-Rails-Wizardry/redactor \
+  --title "vX.Y.Z" \
+  --notes-file /tmp/release-notes.md \
+  --verify-tag
+```
+
+To replace notes on an existing release:
+
+```bash
+gh release edit vX.Y.Z --notes-file /tmp/release-notes.md
+```
+
+Confirm:
+
+```bash
+gh release view vX.Y.Z --repo Ruby-on-Rails-Wizardry/redactor
+```
+
+### 9. Verify CI
+
+- GitHub Actions on the release commit/tag is green
+- Release page shows correct notes:  
+  https://github.com/Ruby-on-Rails-Wizardry/redactor/releases
+
+### 10. Post-release
+
+- [ ] `gh release list` shows `vX.Y.Z`
+- [ ] New work goes under `[Unreleased]` again
+- Optionally bump to the next development version only when you start that cycle
 
 ## What not to ship in a release commit
 
@@ -117,5 +153,5 @@ EOF
 ## Quick one-liner reminder
 
 ```text
-test → changelog → version → docs → commit → tag → push master + tag → CI green
+test → changelog → version → docs → commit → tag → push master + tag → gh release create → CI green
 ```
